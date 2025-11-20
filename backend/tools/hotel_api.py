@@ -1,236 +1,333 @@
-"""
-Hotel API Tool - Real-time hotel search using Booking.com Rapid API.
-
-Integrates with RapidAPI's Booking.com endpoint for live hotel data.
-Falls back to mock data if API key is not configured.
-"""
-
 import asyncio
-import os
-from typing import Dict, Any, AsyncGenerator, Optional
-import logging
-from datetime import datetime, timedelta
+from typing import AsyncIterator, Dict, List
 import httpx
-from dotenv import load_dotenv
+from datetime import datetime, timedelta
 
-# Load environment variables
-load_dotenv()
-
-logger = logging.getLogger(__name__)
-
-# RapidAPI configuration for Booking.com
-RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
-RAPIDAPI_HOST = "booking-com.p.rapidapi.com"
-RAPIDAPI_BASE_URL = f"https://{RAPIDAPI_HOST}/v1"
+try:
+    from config import config
+except ImportError:
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from config import config
 
 
-async def search_hotels_iter(params: Dict[str, Any]) -> AsyncGenerator[Dict[str, Any], None]:
-    """
-    Search hotels using Booking.com API or fallback to mock data.
+class AmadeusHotelAPI:
+    """Amadeus Hotel API integration."""
     
-    Args:
-        params: Search parameters containing:
-            - location: City or airport code (e.g., "Los Angeles", "LAX")
-            - checkin: Check-in date (YYYY-MM-DD)
-            - checkout: Check-out date (YYYY-MM-DD)
-            - adults: Number of adults (default: 2)
-            - rooms: Number of rooms (default: 1)
-            
-    Yields:
-        Dict containing a batch of hotel results
-    """
-    location = params.get("location", "Los Angeles")
-    checkin = params.get("checkin", "2025-12-15")
-    checkout = params.get("checkout", "2025-12-17")
-    adults = params.get("adults", 2)
-    rooms = params.get("rooms", 1)
+    def __init__(self):
+        self.api_key = config.AMADEUS_API_KEY
+        self.api_secret = config.AMADEUS_API_SECRET
+        self.hostname = config.AMADEUS_HOSTNAME
+        self.access_token = None
+        self.token_expiry = None
     
-    logger.info(f"[HotelAPI] Searching hotels: {location}, {checkin} to {checkout}")
+    async def get_access_token(self):
+        """Get OAuth2 access token from Amadeus."""
+        if self.access_token and self.token_expiry and datetime.now() < self.token_expiry:
+            return self.access_token
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"https://{self.hostname}/v1/security/oauth2/token",
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": self.api_key,
+                    "client_secret": self.api_secret
+                }
+            )
+            data = response.json()
+            self.access_token = data["access_token"]
+            self.token_expiry = datetime.now() + timedelta(seconds=data.get("expires_in", 1799) - 300)
+            return self.access_token
     
-    # Try real API first
-    if RAPIDAPI_KEY:
-        async for batch in _search_booking_api(location, checkin, checkout, adults, rooms):
-            yield batch
-    else:
-        logger.warning("[HotelAPI] Using fallback mock data (RapidAPI key not configured)")
-        async for batch in _search_mock_hotels(location, checkin, checkout, adults, rooms):
-            yield batch
-
-
-async def _search_booking_api(
-    location: str,
-    checkin: str,
-    checkout: str,
-    adults: int,
-    rooms: int
-) -> AsyncGenerator[Dict[str, Any], None]:
-    """
-    Search hotels using real Booking.com API via RapidAPI.
-    
-    API Documentation: https://rapidapi.com/apidojo/api/booking
-    """
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Step 1: Get destination ID from location name
-            dest_response = await client.get(
-                f"{RAPIDAPI_BASE_URL}/hotels/locations",
-                params={"name": location, "locale": "en-us"},
-                headers={
-                    "X-RapidAPI-Key": RAPIDAPI_KEY,
-                    "X-RapidAPI-Host": RAPIDAPI_HOST
+    async def search_hotels(self, city_code: str, checkin: str = None, checkout: str = None):
+        """Search hotels using Amadeus API."""
+        token = await self.get_access_token()
+        
+        # Default dates if not provided
+        if not checkin:
+            checkin = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        if not checkout:
+            checkout = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d")
+        
+        async with httpx.AsyncClient() as client:
+            # First, get hotel list by city
+            response = await client.get(
+                f"https://{self.hostname}/v1/reference-data/locations/hotels/by-city",
+                headers={"Authorization": f"Bearer {token}"},
+                params={
+                    "cityCode": city_code.upper()[:3],
+                    "radius": 20,
+                    "radiusUnit": "KM"
                 }
             )
             
-            if dest_response.status_code != 200:
-                logger.error(f"[HotelAPI] Location lookup failed: {dest_response.status_code}")
-                raise Exception(f"Failed to lookup location: {location}")
+            if response.status_code != 200:
+                raise Exception(f"Amadeus API error: {response.text}")
             
-            destinations = dest_response.json()
-            if not destinations:
-                logger.warning(f"[HotelAPI] No destination found for: {location}")
-                yield {
-                    "page": 1,
-                    "total_pages": 1,
-                    "results": [],
-                    "result_count": 0,
-                    "source": "booking_api"
-                }
-                return
+            hotel_data = response.json()
+            hotel_ids = [h["hotelId"] for h in hotel_data.get("data", [])[:10]]
             
-            dest_id = destinations[0].get("dest_id")
-            dest_type = destinations[0].get("dest_type", "city")
+            if not hotel_ids:
+                return []
             
-            logger.info(f"[HotelAPI] Found destination ID: {dest_id}")
-            
-            # Step 2: Search hotels
-            search_response = await client.get(
-                f"{RAPIDAPI_BASE_URL}/hotels/search",
+            # Get hotel offers
+            offers_response = await client.get(
+                f"https://{self.hostname}/v3/shopping/hotel-offers",
+                headers={"Authorization": f"Bearer {token}"},
                 params={
-                    "dest_id": dest_id,
-                    "dest_type": dest_type,
+                    "hotelIds": ",".join(hotel_ids[:5]),
+                    "checkInDate": checkin,
+                    "checkOutDate": checkout,
+                    "adults": 1
+                }
+            )
+            
+            offers_data = offers_response.json()
+            hotels = []
+            
+            for offer in offers_data.get("data", [])[:5]:
+                hotel_info = offer.get("hotel", {})
+                best_offer = offer.get("offers", [{}])[0]
+                
+                hotels.append({
+                    "name": hotel_info.get("name", "Unknown Hotel"),
+                    "rating": hotel_info.get("rating", "N/A"),
+                    "price": float(best_offer.get("price", {}).get("total", 0)),
+                    "currency": best_offer.get("price", {}).get("currency", "USD"),
+                    "location": hotel_info.get("cityCode", city_code),
+                    "address": hotel_info.get("address", {}).get("lines", [""])[0],
+                    "checkin": checkin,
+                    "checkout": checkout
+                })
+            
+            return hotels
+
+
+class RapidAPIBookingHotels:
+    """Booking.com hotel search via RapidAPI."""
+    
+    def __init__(self):
+        self.api_key = config.RAPIDAPI_KEY
+        self.host = config.RAPIDAPI_HOTEL_HOST
+    
+    async def search_hotels(self, location: str, checkin: str = None, checkout: str = None):
+        """Search hotels using RapidAPI Booking.com."""
+        if not checkin:
+            checkin = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+        if not checkout:
+            checkout = (datetime.now() + timedelta(days=9)).strftime("%Y-%m-%d")
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # First, search for location to get dest_id
+            location_response = await client.get(
+                f"https://{self.host}/v1/hotels/locations",
+                headers={
+                    "x-rapidapi-key": self.api_key,
+                    "x-rapidapi-host": self.host
+                },
+                params={
+                    "locale": "en-gb",
+                    "name": location
+                }
+            )
+            
+            if location_response.status_code != 200:
+                raise Exception(f"RapidAPI location error: {location_response.text}")
+            
+            locations = location_response.json()
+            if not locations:
+                raise Exception(f"No location found for: {location}")
+            
+            # Get first matching location
+            dest_id = locations[0].get("dest_id", "")
+            dest_type = locations[0].get("dest_type", "city")
+            
+            # Now search for hotels
+            search_response = await client.get(
+                f"https://{self.host}/v1/hotels/search",
+                headers={
+                    "x-rapidapi-key": self.api_key,
+                    "x-rapidapi-host": self.host
+                },
+                params={
+                    "locale": "en-gb",
+                    "room_number": 1,
                     "checkin_date": checkin,
                     "checkout_date": checkout,
-                    "adults_number": adults,
-                    "room_number": rooms,
+                    "filter_by_currency": "USD",
+                    "adults_number": 1,
                     "units": "metric",
-                    "locale": "en-us",
-                    "currency": "USD",
                     "order_by": "popularity",
+                    "dest_id": dest_id,
+                    "dest_type": dest_type,
                     "page_number": 0
-                },
-                headers={
-                    "X-RapidAPI-Key": RAPIDAPI_KEY,
-                    "X-RapidAPI-Host": RAPIDAPI_HOST
                 }
             )
             
-            if search_response.status_code == 200:
-                data = search_response.json()
-                hotels = data.get("result", [])
-                
-                if not hotels:
-                    logger.warning("[HotelAPI] No hotels found from Booking.com API")
-                    yield {
-                        "page": 1,
-                        "total_pages": 1,
-                        "results": [],
-                        "result_count": 0,
-                        "source": "booking_api"
-                    }
-                    return
-                
-                # Transform Booking.com data to our format
-                transformed_hotels = []
-                for hotel in hotels[:15]:  # Limit to 15 results
-                    transformed_hotels.append({
-                        "hotel_id": hotel.get("hotel_id", "N/A"),
-                        "name": hotel.get("hotel_name", "N/A"),
-                        "address": hotel.get("address", "N/A"),
-                        "city": hotel.get("city", location),
-                        "latitude": hotel.get("latitude"),
-                        "longitude": hotel.get("longitude"),
-                        "rating": float(hotel.get("review_score", 0)),
-                        "review_count": hotel.get("review_nr", 0),
-                        "price_per_night": float(hotel.get("min_total_price", 0)) / max(1, int((datetime.strptime(checkout, "%Y-%m-%d") - datetime.strptime(checkin, "%Y-%m-%d")).days)),
-                        "currency": hotel.get("currency_code", "USD"),
-                        "image_url": hotel.get("main_photo_url", ""),
-                        "distance_km": hotel.get("distance", 0),
-                        "amenities": hotel.get("hotel_facilities", "").split(",")[:5] if hotel.get("hotel_facilities") else []
-                    })
-                
-                # Return as single page (API returns all results at once)
-                yield {
-                    "page": 1,
-                    "total_pages": 1,
-                    "results": transformed_hotels,
-                    "result_count": len(transformed_hotels),
-                    "source": "booking_api"
-                }
-                
-                logger.info(f"[HotelAPI] Retrieved {len(transformed_hotels)} hotels from Booking.com")
-                
-            else:
-                logger.error(f"[HotelAPI] Booking.com API error: {search_response.status_code}")
-                logger.error(f"[HotelAPI] Response: {search_response.text}")
-                raise Exception(f"Booking.com API returned {search_response.status_code}")
-                    
-    except Exception as e:
-        logger.error(f"[HotelAPI] Booking.com API exception: {e}", exc_info=True)
-        raise
-
-
-async def _search_mock_hotels(
-    location: str,
-    checkin: str,
-    checkout: str,
-    adults: int,
-    rooms: int
-) -> AsyncGenerator[Dict[str, Any], None]:
-    """
-    Fallback mock hotel data generator.
-    Used when RapidAPI key is not configured or unavailable.
-    """
-    import random
-    
-    total_pages = 2
-    results_per_page = 8
-    
-    hotel_chains = ["Marriott", "Hilton", "Hyatt", "Best Western", "Holiday Inn", "Radisson"]
-    amenities_list = ["WiFi", "Pool", "Gym", "Parking", "Restaurant", "Spa", "Bar", "Airport Shuttle"]
-    
-    for page in range(1, total_pages + 1):
-        # Simulate API latency
-        await asyncio.sleep(1.5)
-        
-        hotels = []
-        for i in range(results_per_page):
-            chain = random.choice(hotel_chains)
-            hotel_type = random.choice(["Hotel", "Suites", "Inn", "Resort"])
+            if search_response.status_code != 200:
+                raise Exception(f"RapidAPI search error: {search_response.text}")
             
-            hotels.append({
-                "hotel_id": f"hotel_{page}_{i}",
-                "name": f"{chain} {hotel_type} {location}",
-                "address": f"{random.randint(100, 9999)} Main St, {location}",
-                "city": location,
-                "latitude": 34.0522 + random.uniform(-0.1, 0.1),
-                "longitude": -118.2437 + random.uniform(-0.1, 0.1),
-                "rating": round(random.uniform(3.5, 5.0), 1),
-                "review_count": random.randint(50, 2000),
-                "price_per_night": random.randint(80, 350),
-                "currency": "USD",
-                "image_url": f"https://example.com/hotel_{i}.jpg",
-                "distance_km": round(random.uniform(0.5, 15.0), 1),
-                "amenities": random.sample(amenities_list, random.randint(3, 6))
-            })
-        
-        yield {
-            "page": page,
-            "total_pages": total_pages,
-            "results": hotels,
-            "result_count": len(hotels),
-            "source": "mock"
-        }
-        
-        logger.info(f"[HotelAPI] Yielding mock page {page}/{total_pages} with {len(hotels)} hotels")
+            data = search_response.json()
+            hotels = []
+            
+            for hotel in data.get("result", [])[:5]:
+                hotels.append({
+                    "name": hotel.get("hotel_name", "Unknown Hotel"),
+                    "rating": hotel.get("review_score", "N/A"),
+                    "price": float(hotel.get("min_total_price", 0)),
+                    "currency": hotel.get("currency_code", "USD"),
+                    "location": location,
+                    "address": hotel.get("address", ""),
+                    "checkin": checkin,
+                    "checkout": checkout
+                })
+            
+            return hotels
+
+
+class SerpAPIHotelSearch:
+    """Google Hotel search via SerpAPI."""
     
-    logger.info(f"[HotelAPI] Completed mock search for {location}")
+    def __init__(self):
+        self.api_key = config.SERPAPI_KEY
+    
+    async def search_hotels(self, location: str, checkin: str = None, checkout: str = None):
+        """Search hotels using SerpAPI Google Hotels."""
+        if not checkin:
+            checkin = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        if not checkout:
+            checkout = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d")
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://serpapi.com/search",
+                params={
+                    "engine": "google_hotels",
+                    "q": f"hotels in {location}",
+                    "check_in_date": checkin,
+                    "check_out_date": checkout,
+                    "adults": "1",
+                    "currency": "USD",
+                    "api_key": self.api_key
+                }
+            )
+            
+            data = response.json()
+            hotels = []
+            
+            for hotel in data.get("properties", [])[:5]:
+                hotels.append({
+                    "name": hotel.get("name", "Unknown Hotel"),
+                    "rating": hotel.get("overall_rating", "N/A"),
+                    "price": hotel.get("rate_per_night", {}).get("lowest", 0),
+                    "currency": "USD",
+                    "location": location,
+                    "address": hotel.get("description", ""),
+                    "checkin": checkin,
+                    "checkout": checkout
+                })
+            
+            return hotels
+
+
+# Mock implementation for testing
+async def _mock_partials(input_data: dict):
+    """Yield a few partial updates to simulate streaming."""
+    for i in range(2):
+        await asyncio.sleep(0.7)
+        yield {"step": i + 1, "note": f"Searching hotels batch {i+1}..."}
+
+
+async def _mock_hotel_search(input_data: dict):
+    """Stubbed hotel search for testing."""
+    await asyncio.sleep(0.3)
+    location = input_data.get("location", "Unknown City")
+    
+    return [
+        {
+            "name": "Demo Inn",
+            "rating": 4.2,
+            "price": 89.99,
+            "currency": "USD",
+            "location": location,
+            "address": "123 Main St",
+            "checkin": "2025-12-01",
+            "checkout": "2025-12-03"
+        },
+        {
+            "name": "Sample Suites",
+            "rating": 4.6,
+            "price": 129.99,
+            "currency": "USD",
+            "location": location,
+            "address": "456 Park Ave",
+            "checkin": "2025-12-01",
+            "checkout": "2025-12-03"
+        },
+    ]
+
+
+async def search_hotels(input_data: dict, final: bool = False) -> List[Dict]:
+    """Main hotel search function with real API or mock fallback.
+    
+    Args:
+        input_data: Dictionary with keys: location, checkin, checkout, raw
+        final: If False, returns async generator for partials. If True, returns final results.
+    
+    Returns:
+        List of hotel dictionaries or async generator for partials
+    """
+    if not final:
+        # Return async generator for partial results
+        return _mock_partials(input_data)
+    
+    # Check if real APIs should be used
+    if config.USE_REAL_APIS:
+        # Extract parameters
+        location = input_data.get("location", "")
+        checkin = input_data.get("checkin")
+        checkout = input_data.get("checkout")
+        
+        # Validate we have required params
+        if not location:
+            # Try to parse from raw query if available
+            raw = input_data.get("raw", "")
+            if "in" in raw.lower() or "hotel" in raw.lower():
+                # Simple extraction (in production, use LLM)
+                parts = raw.lower().split()
+                if "in" in parts:
+                    try:
+                        idx = parts.index("in")
+                        if idx + 1 < len(parts):
+                            location = parts[idx + 1]
+                    except (ValueError, IndexError):
+                        pass
+        
+        # Try RapidAPI Booking.com first
+        if config.RAPIDAPI_KEY and location:
+            try:
+                rapid = RapidAPIBookingHotels()
+                return await rapid.search_hotels(location, checkin, checkout)
+            except Exception as e:
+                print(f"RapidAPI Booking.com error: {e}, falling back to Amadeus")
+        
+        # Try Amadeus as fallback
+        if config.AMADEUS_API_KEY and config.AMADEUS_API_SECRET and location:
+            try:
+                amadeus = AmadeusHotelAPI()
+                return await amadeus.search_hotels(location, checkin, checkout)
+            except Exception as e:
+                print(f"Amadeus API error: {e}, falling back to SerpAPI")
+        
+        # Try SerpAPI as last fallback
+        if config.SERPAPI_KEY and location:
+            try:
+                serp = SerpAPIHotelSearch()
+                return await serp.search_hotels(location, checkin, checkout)
+            except Exception as e:
+                print(f"SerpAPI error: {e}, using mock data")
+    
+    # Fallback to mock data
+    return await _mock_hotel_search(input_data)

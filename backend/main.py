@@ -1,208 +1,98 @@
-"""
-FastAPI Backend - REST API for Multi-Agent Travel Planning Assistant.
-
-Endpoints:
-- POST /api/message - Start a new search
-- POST /api/cancel/{request_id} - Cancel a running search
-- GET /api/status/{request_id} - Get status and partial results
-- GET /api/health - Health check
-"""
-
+import os
+import sys
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
-import logging
-import uuid
 
-from state_store import StateStore
-from agent.coordinator import CoordinatorAgent
-from runner import TaskRunner
+# ensure backend package path is importable when running from workspace root
+sys.path.append(os.path.dirname(__file__))
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+try:
+    from runner import AgentManager
+    from config import config
+except ImportError:
+    import runner
+    import config as config_module
+    AgentManager = runner.AgentManager
+    config = config_module.config
 
-logger = logging.getLogger(__name__)
-
-# Initialize FastAPI app
 app = FastAPI(
-    title="Multi-Agent Travel Planning API",
-    description="Async travel search with cancellation support",
+    title="Travel Planning Assistant - Backend",
+    description="Multi-agent travel assistant with LangGraph orchestration",
     version="1.0.0"
 )
 
-# Add CORS middleware for frontend integration
+# CORS middleware for frontend integration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify exact origins
+    allow_origins=["*"],  # Configure appropriately for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize global components
-state_store = StateStore()
-coordinator = CoordinatorAgent(state_store)
-task_runner = TaskRunner(coordinator)
-
-logger.info("[FastAPI] Application initialized")
+manager = AgentManager()
 
 
-# Request/Response models
-class MessageRequest(BaseModel):
-    message: str
-    request_id: Optional[str] = None
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "message": "Find flights from JFK to LAX on 2025-12-15 and hotels in Los Angeles",
-                "request_id": "optional_custom_id"
-            }
-        }
-
-
-class MessageResponse(BaseModel):
-    request_id: str
-    status: str
+class ChatRequest(BaseModel):
+    user_id: str
     message: str
 
 
-class StatusResponse(BaseModel):
-    request_id: str
-    is_running: bool
-    status: str
-    data: dict
+class InterruptRequest(BaseModel):
+    user_id: str
 
 
-# Endpoints
-@app.get("/api/health")
-async def health_check():
-    """Health check endpoint."""
+@app.get("/")
+def root():
     return {
-        "status": "healthy",
-        "service": "Multi-Agent Travel Planning API",
-        "version": "1.0.0"
+        "service": "Travel Planning Assistant",
+        "version": "1.0.0",
+        "status": "running"
     }
 
 
-@app.post("/api/message", response_model=MessageResponse)
-async def process_message(request: MessageRequest):
-    """
-    Process user message and start agent search.
+@app.post("/chat")
+async def chat(req: ChatRequest):
+    """Submit a new user query to the travel assistant.
     
-    Returns immediately with request_id.
-    Use /api/status/{request_id} to check progress.
+    Returns a task_id that can be used to track status.
     """
-    try:
-        # Generate request ID if not provided
-        request_id = request.request_id or f"req_{uuid.uuid4().hex[:12]}"
-        
-        logger.info(f"[API] Received message for {request_id}: {request.message}")
-        
-        # Start background task
-        task_runner.start_task(request_id, request.message)
-        
-        return {
-            "request_id": request_id,
-            "status": "started",
-            "message": "Search started. Use /api/status/{request_id} to check progress."
-        }
-        
-    except Exception as e:
-        logger.error(f"[API] Error processing message: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/cancel/{request_id}")
-async def cancel_request(request_id: str):
-    """
-    Cancel a running search request.
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
     
-    Returns partial results collected before cancellation.
-    """
-    try:
-        logger.info(f"[API] Cancellation requested for {request_id}")
-        
-        success = task_runner.cancel_task(request_id)
-        
-        if not success:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Request {request_id} not found or already completed"
-            )
-        
-        # Get partial results
-        status = task_runner.get_status(request_id)
-        
-        return {
-            "request_id": request_id,
-            "status": "cancelled",
-            "message": "Search cancelled successfully",
-            "partial_results": status.get("partials", {})
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[API] Error cancelling request: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    task_id = await manager.handle_user_message(req.user_id, req.message)
+    return {"task_id": task_id, "status": "processing"}
 
 
-@app.get("/api/status/{request_id}", response_model=StatusResponse)
-async def get_status(request_id: str):
-    """
-    Get current status of a search request.
+@app.post("/interrupt")
+async def interrupt(req: InterruptRequest):
+    """Interrupt the currently running workflow for a user.
     
-    Returns:
-    - is_running: Whether search is still in progress
-    - status: Current status (running, completed, cancelled, error)
-    - data: Partial or final results
+    Cancels in-flight agent operations and preserves partial results.
     """
-    try:
-        status = task_runner.get_status(request_id)
-        
-        if status.get("status") == "not_found":
-            raise HTTPException(status_code=404, detail=f"Request {request_id} not found")
-        
-        return {
-            "request_id": request_id,
-            "is_running": status.get("is_running", False),
-            "status": status.get("status", "unknown"),
-            "data": status
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[API] Error getting status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    await manager.interrupt(req.user_id)
+    return {"status": "interrupted", "user_id": req.user_id}
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Run on application startup."""
-    logger.info("[FastAPI] Application startup complete")
+@app.get("/status/{user_id}")
+def status(user_id: str):
+    """Get current workflow status for a user."""
+    return manager.get_status(user_id)
 
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Run on application shutdown."""
-    logger.info("[FastAPI] Application shutting down")
+@app.get("/health")
+def health():
+    """Health check endpoint."""
+    return {"status": "healthy"}
 
 
 if __name__ == "__main__":
     import uvicorn
-    
-    logger.info("[FastAPI] Starting server on http://localhost:8000")
-    
+
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
+        host=config.HOST,
+        port=config.PORT,
+        reload=config.DEBUG
     )
