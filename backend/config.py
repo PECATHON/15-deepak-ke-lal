@@ -23,6 +23,10 @@ class Config:
     
     # RapidAPI
     RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "")
+    RAPIDAPI_HOTEL_HOST = os.getenv("RAPIDAPI_HOTEL_HOST", "booking-com.p.rapidapi.com")
+    
+    # AviationStack Flight API
+    AVIATIONSTACK_KEY = os.getenv("AVIATIONSTACK_KEY", "")
     
     # Backend
     DEBUG = os.getenv("DEBUG", "True").lower() == "true"

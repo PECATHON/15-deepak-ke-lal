@@ -89,6 +89,56 @@ class AmadeusFlightAPI:
             return flights
 
 
+class AviationStackFlightAPI:
+    """AviationStack Flight API integration."""
+    
+    def __init__(self):
+        self.api_key = config.AVIATIONSTACK_KEY
+    
+    async def search_flights(self, origin: str, destination: str, date: str = None):
+        """Search flights using AviationStack API."""
+        if not date:
+            date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "http://api.aviationstack.com/v1/flights",
+                params={
+                    "access_key": self.api_key,
+                    "dep_iata": origin.upper()[:3],
+                    "arr_iata": destination.upper()[:3],
+                    "flight_date": date,
+                    "limit": 5
+                }
+            )
+            
+            if response.status_code != 200:
+                raise Exception(f"AviationStack API error: {response.text}")
+            
+            data = response.json()
+            flights = []
+            
+            for flight in data.get("data", [])[:5]:
+                departure = flight.get("departure", {})
+                arrival = flight.get("arrival", {})
+                airline = flight.get("airline", {})
+                
+                flights.append({
+                    "airline": airline.get("name", "Unknown"),
+                    "flight_number": flight.get("flight", {}).get("iata", "N/A"),
+                    "price": 199.99,  # AviationStack doesn't provide pricing
+                    "currency": "USD",
+                    "from": departure.get("iata", origin.upper()[:3]),
+                    "to": arrival.get("iata", destination.upper()[:3]),
+                    "departure": departure.get("scheduled", ""),
+                    "arrival": arrival.get("scheduled", ""),
+                    "duration": "N/A",
+                    "stops": 0
+                })
+            
+            return flights
+
+
 class SerpAPIFlightSearch:
     """Google Flight search via SerpAPI."""
     
@@ -142,37 +192,35 @@ async def _mock_partials(input_data: dict):
 
 
 async def _mock_flight_search(input_data: dict):
-    """Stubbed flight search for testing."""
+    """Stubbed flight search for testing - Enhanced with realistic data."""
     await asyncio.sleep(0.5)
     source = input_data.get("source", "NYC")
     dest = input_data.get("destination", "LAX")
+    date = input_data.get("date", (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d"))
     
-    return [
-        {
-            "airline": "DemoAir",
-            "flight_number": "DA123",
-            "price": 199.99,
+    # Generate more realistic mock data
+    airlines = ["United Airlines", "Delta Air Lines", "American Airlines", "JetBlue Airways", "Southwest Airlines"]
+    
+    flights = []
+    for i in range(5):
+        base_price = 199.99 + (i * 50)
+        dep_hour = 8 + (i * 2)
+        duration_minutes = 210 + (i * 15)
+        
+        flights.append({
+            "airline": airlines[i % len(airlines)],
+            "flight_number": f"{airlines[i % len(airlines)][:2].upper()}{1230 + i}",
+            "price": round(base_price, 2),
             "currency": "USD",
             "from": source[:3].upper(),
             "to": dest[:3].upper(),
-            "departure": "2025-12-01T08:00:00",
-            "arrival": "2025-12-01T11:30:00",
-            "duration": "3h 30m",
-            "stops": 0
-        },
-        {
-            "airline": "SampleJet",
-            "flight_number": "SJ456",
-            "price": 249.99,
-            "currency": "USD",
-            "from": source[:3].upper(),
-            "to": dest[:3].upper(),
-            "departure": "2025-12-01T14:00:00",
-            "arrival": "2025-12-01T17:45:00",
-            "duration": "3h 45m",
-            "stops": 0
-        },
-    ]
+            "departure": f"{date}T{dep_hour:02d}:00:00",
+            "arrival": f"{date}T{dep_hour + duration_minutes//60:02d}:{duration_minutes%60:02d}:00",
+            "duration": f"{duration_minutes//60}h {duration_minutes%60}m",
+            "stops": i % 2
+        })
+    
+    return flights
 
 
 async def search_flights(input_data: dict, final: bool = False) -> List[Dict]:
@@ -213,7 +261,15 @@ async def search_flights(input_data: dict, final: bool = False) -> List[Dict]:
                 except (ValueError, IndexError):
                     pass
         
-        # Try Amadeus first
+        # Try AviationStack first
+        if config.AVIATIONSTACK_KEY:
+            try:
+                aviation = AviationStackFlightAPI()
+                return await aviation.search_flights(source, destination, date)
+            except Exception as e:
+                print(f"AviationStack API error: {e}, falling back to Amadeus")
+        
+        # Try Amadeus as fallback
         if config.AMADEUS_API_KEY and config.AMADEUS_API_SECRET:
             try:
                 amadeus = AmadeusFlightAPI()
@@ -221,7 +277,7 @@ async def search_flights(input_data: dict, final: bool = False) -> List[Dict]:
             except Exception as e:
                 print(f"Amadeus API error: {e}, falling back to SerpAPI")
         
-        # Try SerpAPI as fallback
+        # Try SerpAPI as last fallback
         if config.SERPAPI_KEY:
             try:
                 serp = SerpAPIFlightSearch()

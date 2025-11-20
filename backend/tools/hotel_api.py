@@ -105,6 +105,88 @@ class AmadeusHotelAPI:
             return hotels
 
 
+class RapidAPIBookingHotels:
+    """Booking.com hotel search via RapidAPI."""
+    
+    def __init__(self):
+        self.api_key = config.RAPIDAPI_KEY
+        self.host = config.RAPIDAPI_HOTEL_HOST
+    
+    async def search_hotels(self, location: str, checkin: str = None, checkout: str = None):
+        """Search hotels using RapidAPI Booking.com."""
+        if not checkin:
+            checkin = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+        if not checkout:
+            checkout = (datetime.now() + timedelta(days=9)).strftime("%Y-%m-%d")
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # First, search for location to get dest_id
+            location_response = await client.get(
+                f"https://{self.host}/v1/hotels/locations",
+                headers={
+                    "x-rapidapi-key": self.api_key,
+                    "x-rapidapi-host": self.host
+                },
+                params={
+                    "locale": "en-gb",
+                    "name": location
+                }
+            )
+            
+            if location_response.status_code != 200:
+                raise Exception(f"RapidAPI location error: {location_response.text}")
+            
+            locations = location_response.json()
+            if not locations:
+                raise Exception(f"No location found for: {location}")
+            
+            # Get first matching location
+            dest_id = locations[0].get("dest_id", "")
+            dest_type = locations[0].get("dest_type", "city")
+            
+            # Now search for hotels
+            search_response = await client.get(
+                f"https://{self.host}/v1/hotels/search",
+                headers={
+                    "x-rapidapi-key": self.api_key,
+                    "x-rapidapi-host": self.host
+                },
+                params={
+                    "locale": "en-gb",
+                    "room_number": 1,
+                    "checkin_date": checkin,
+                    "checkout_date": checkout,
+                    "filter_by_currency": "USD",
+                    "adults_number": 1,
+                    "units": "metric",
+                    "order_by": "popularity",
+                    "dest_id": dest_id,
+                    "dest_type": dest_type,
+                    "page_number": 0
+                }
+            )
+            
+            if search_response.status_code != 200:
+                raise Exception(f"RapidAPI search error: {search_response.text}")
+            
+            data = search_response.json()
+            hotels = []
+            
+            for hotel in data.get("result", [])[:5]:
+                hotels.append({
+                    "name": hotel.get("hotel_name", "Unknown Hotel"),
+                    "rating": hotel.get("review_score", "N/A"),
+                    "price": float(hotel.get("min_total_price", 0)),
+                    "currency": hotel.get("currency_code", "USD"),
+                    "location": location,
+                    "address": hotel.get("address", ""),
+                    "checkin": checkin,
+                    "checkout": checkout
+                })
+            
+            return hotels
+
+
 class SerpAPIHotelSearch:
     """Google Hotel search via SerpAPI."""
     
@@ -223,7 +305,15 @@ async def search_hotels(input_data: dict, final: bool = False) -> List[Dict]:
                     except (ValueError, IndexError):
                         pass
         
-        # Try Amadeus first
+        # Try RapidAPI Booking.com first
+        if config.RAPIDAPI_KEY and location:
+            try:
+                rapid = RapidAPIBookingHotels()
+                return await rapid.search_hotels(location, checkin, checkout)
+            except Exception as e:
+                print(f"RapidAPI Booking.com error: {e}, falling back to Amadeus")
+        
+        # Try Amadeus as fallback
         if config.AMADEUS_API_KEY and config.AMADEUS_API_SECRET and location:
             try:
                 amadeus = AmadeusHotelAPI()
@@ -231,7 +321,7 @@ async def search_hotels(input_data: dict, final: bool = False) -> List[Dict]:
             except Exception as e:
                 print(f"Amadeus API error: {e}, falling back to SerpAPI")
         
-        # Try SerpAPI as fallback
+        # Try SerpAPI as last fallback
         if config.SERPAPI_KEY and location:
             try:
                 serp = SerpAPIHotelSearch()
