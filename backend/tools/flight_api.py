@@ -1,0 +1,233 @@
+import asyncio
+from typing import AsyncIterator, Dict, List
+import httpx
+from datetime import datetime, timedelta
+
+try:
+    from config import config
+except ImportError:
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from config import config
+
+
+class AmadeusFlightAPI:
+    """Amadeus Flight API integration."""
+    
+    def __init__(self):
+        self.api_key = config.AMADEUS_API_KEY
+        self.api_secret = config.AMADEUS_API_SECRET
+        self.hostname = config.AMADEUS_HOSTNAME
+        self.access_token = None
+        self.token_expiry = None
+    
+    async def get_access_token(self):
+        """Get OAuth2 access token from Amadeus."""
+        if self.access_token and self.token_expiry and datetime.now() < self.token_expiry:
+            return self.access_token
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"https://{self.hostname}/v1/security/oauth2/token",
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": self.api_key,
+                    "client_secret": self.api_secret
+                }
+            )
+            data = response.json()
+            self.access_token = data["access_token"]
+            # Token expires in 1799 seconds, refresh 5 min before
+            self.token_expiry = datetime.now() + timedelta(seconds=data.get("expires_in", 1799) - 300)
+            return self.access_token
+    
+    async def search_flights(self, origin: str, destination: str, date: str = None, adults: int = 1):
+        """Search flights using Amadeus API."""
+        token = await self.get_access_token()
+        
+        # Default to tomorrow if no date provided
+        if not date:
+            date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://{self.hostname}/v2/shopping/flight-offers",
+                headers={"Authorization": f"Bearer {token}"},
+                params={
+                    "originLocationCode": origin.upper()[:3],
+                    "destinationLocationCode": destination.upper()[:3],
+                    "departureDate": date,
+                    "adults": adults,
+                    "max": 5  # Limit results
+                }
+            )
+            
+            if response.status_code != 200:
+                raise Exception(f"Amadeus API error: {response.text}")
+            
+            data = response.json()
+            flights = []
+            
+            for offer in data.get("data", [])[:5]:
+                itinerary = offer["itineraries"][0]
+                segment = itinerary["segments"][0]
+                
+                flights.append({
+                    "airline": segment["carrierCode"],
+                    "flight_number": f"{segment['carrierCode']}{segment['number']}",
+                    "price": float(offer["price"]["total"]),
+                    "currency": offer["price"]["currency"],
+                    "from": segment["departure"]["iataCode"],
+                    "to": segment["arrival"]["iataCode"],
+                    "departure": segment["departure"]["at"],
+                    "arrival": segment["arrival"]["at"],
+                    "duration": itinerary["duration"],
+                    "stops": len(itinerary["segments"]) - 1
+                })
+            
+            return flights
+
+
+class SerpAPIFlightSearch:
+    """Google Flight search via SerpAPI."""
+    
+    def __init__(self):
+        self.api_key = config.SERPAPI_KEY
+    
+    async def search_flights(self, origin: str, destination: str, date: str = None):
+        """Search flights using SerpAPI Google Flights."""
+        if not date:
+            date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://serpapi.com/search",
+                params={
+                    "engine": "google_flights",
+                    "departure_id": origin.upper()[:3],
+                    "arrival_id": destination.upper()[:3],
+                    "outbound_date": date,
+                    "type": "1",  # One way
+                    "api_key": self.api_key
+                }
+            )
+            
+            data = response.json()
+            flights = []
+            
+            for flight in data.get("best_flights", [])[:5]:
+                flights.append({
+                    "airline": flight["flights"][0]["airline"],
+                    "flight_number": flight["flights"][0].get("flight_number", "N/A"),
+                    "price": flight["price"],
+                    "currency": "USD",
+                    "from": origin.upper()[:3],
+                    "to": destination.upper()[:3],
+                    "departure": flight["flights"][0]["departure_airport"]["time"],
+                    "arrival": flight["flights"][0]["arrival_airport"]["time"],
+                    "duration": flight["total_duration"],
+                    "stops": len(flight["flights"]) - 1
+                })
+            
+            return flights
+
+
+# Mock implementation for testing
+async def _mock_partials(input_data: dict):
+    """Yield a few partial updates to simulate streaming."""
+    for i in range(2):
+        await asyncio.sleep(0.8)
+        yield {"step": i + 1, "note": f"Searching flights batch {i+1}..."}
+
+
+async def _mock_flight_search(input_data: dict):
+    """Stubbed flight search for testing."""
+    await asyncio.sleep(0.5)
+    source = input_data.get("source", "NYC")
+    dest = input_data.get("destination", "LAX")
+    
+    return [
+        {
+            "airline": "DemoAir",
+            "flight_number": "DA123",
+            "price": 199.99,
+            "currency": "USD",
+            "from": source[:3].upper(),
+            "to": dest[:3].upper(),
+            "departure": "2025-12-01T08:00:00",
+            "arrival": "2025-12-01T11:30:00",
+            "duration": "3h 30m",
+            "stops": 0
+        },
+        {
+            "airline": "SampleJet",
+            "flight_number": "SJ456",
+            "price": 249.99,
+            "currency": "USD",
+            "from": source[:3].upper(),
+            "to": dest[:3].upper(),
+            "departure": "2025-12-01T14:00:00",
+            "arrival": "2025-12-01T17:45:00",
+            "duration": "3h 45m",
+            "stops": 0
+        },
+    ]
+
+
+async def search_flights(input_data: dict, final: bool = False) -> List[Dict]:
+    """Main flight search function with real API or mock fallback.
+    
+    Args:
+        input_data: Dictionary with keys: source, destination, date, raw
+        final: If False, returns async generator for partials. If True, returns final results.
+    
+    Returns:
+        List of flight dictionaries or async generator for partials
+    """
+    if not final:
+        # Return async generator for partial results
+        return _mock_partials(input_data)
+    
+    # Check if real APIs should be used
+    if config.USE_REAL_APIS:
+        # Extract parameters
+        source = input_data.get("source", "")
+        destination = input_data.get("destination", "")
+        date = input_data.get("date")
+        
+        # Validate we have required params
+        if not source or not destination:
+            # Try to parse from raw query if available
+            raw = input_data.get("raw", "")
+            if "from" in raw.lower() and "to" in raw.lower():
+                # Simple extraction (in production, use LLM)
+                parts = raw.lower().split()
+                try:
+                    from_idx = parts.index("from")
+                    to_idx = parts.index("to")
+                    if from_idx + 1 < len(parts):
+                        source = parts[from_idx + 1]
+                    if to_idx + 1 < len(parts):
+                        destination = parts[to_idx + 1]
+                except (ValueError, IndexError):
+                    pass
+        
+        # Try Amadeus first
+        if config.AMADEUS_API_KEY and config.AMADEUS_API_SECRET:
+            try:
+                amadeus = AmadeusFlightAPI()
+                return await amadeus.search_flights(source, destination, date)
+            except Exception as e:
+                print(f"Amadeus API error: {e}, falling back to SerpAPI")
+        
+        # Try SerpAPI as fallback
+        if config.SERPAPI_KEY:
+            try:
+                serp = SerpAPIFlightSearch()
+                return await serp.search_flights(source, destination, date)
+            except Exception as e:
+                print(f"SerpAPI error: {e}, using mock data")
+    
+    # Fallback to mock data
+    return await _mock_flight_search(input_data)
