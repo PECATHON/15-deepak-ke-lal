@@ -36,6 +36,8 @@ class AgentState(TypedDict):
         final_response: Assembled response to user
         cancel_requested: Flag indicating if cancellation was requested
         status: Current workflow status
+        previous_context: Context from previously interrupted tasks
+        partial_results: Preserved partial results from agents
     """
     user_id: str
     messages: list[dict]
@@ -48,6 +50,8 @@ class AgentState(TypedDict):
     final_response: Optional[str]
     cancel_requested: bool
     status: str
+    previous_context: Optional[dict]
+    partial_results: Optional[dict]
 
 
 def router_node(state: AgentState) -> AgentState:
@@ -85,95 +89,200 @@ def router_node(state: AgentState) -> AgentState:
 
 
 async def flight_node(state: AgentState) -> AgentState:
-    """Execute flight search agent."""
+    """Execute flight search agent with cancellation support.
+    
+    Checks for cancellation requests at multiple points and preserves
+    partial results if interrupted.
+    """
     from agent.flight_agent import FlightAgent
     
+    # Early cancellation check
     if state.get("cancel_requested"):
-        return {**state, "status": "cancelled"}
+        return {
+            **state,
+            "status": "cancelled",
+            "flight_results": {"status": "cancelled", "partial": state.get("partial_results", {}).get("flight")}
+        }
     
     agent = FlightAgent()
     
-    # Prepare progress callback that updates state
+    # Track partial results as they arrive
     partial_results = []
     
     async def progress_cb(data):
+        """Callback to track progress and partial results."""
         partial_results.append(data)
+        # Could also emit to websocket here
     
-    # Create cancel event
+    # Create cancel event from configuration
     cancel_event = asyncio.Event()
+    
+    # Check if cancellation is already requested
     if state.get("cancel_requested"):
         cancel_event.set()
     
-    # Run agent
-    result = await agent.run(
-        state["user_id"],
-        state.get("flight_input", {}),
-        progress_cb,
-        cancel_event
-    )
-    
-    return {
-        **state,
-        "flight_results": result,
-        "status": "flight_completed" if result.get("status") == "completed" else "flight_partial"
-    }
+    try:
+        # Run agent with cancellation support
+        result = await agent.run(
+            state["user_id"],
+            state.get("flight_input", {}),
+            progress_cb,
+            cancel_event
+        )
+        
+        # Check for cancellation after agent completes
+        if state.get("cancel_requested") or result.get("status") == "cancelled":
+            return {
+                **state,
+                "flight_results": result,
+                "status": "flight_cancelled",
+                "current_agent": "flight"
+            }
+        
+        return {
+            **state,
+            "flight_results": result,
+            "status": "flight_completed" if result.get("status") == "completed" else "flight_partial",
+            "current_agent": "flight"
+        }
+        
+    except asyncio.CancelledError:
+        # Preserve partial results on cancellation
+        last_partial = partial_results[-1] if partial_results else {}
+        return {
+            **state,
+            "flight_results": {"status": "cancelled", "partial": last_partial},
+            "status": "flight_cancelled",
+            "current_agent": "flight"
+        }
 
 
 async def hotel_node(state: AgentState) -> AgentState:
-    """Execute hotel search agent."""
+    """Execute hotel search agent with cancellation support.
+    
+    Checks for cancellation requests at multiple points and preserves
+    partial results if interrupted.
+    """
     from agent.hotel_agent import HotelAgent
     
+    # Early cancellation check
     if state.get("cancel_requested"):
-        return {**state, "status": "cancelled"}
+        return {
+            **state,
+            "status": "cancelled",
+            "hotel_results": {"status": "cancelled", "partial": state.get("partial_results", {}).get("hotel")}
+        }
     
     agent = HotelAgent()
     partial_results = []
     
     async def progress_cb(data):
+        """Callback to track progress and partial results."""
         partial_results.append(data)
     
     cancel_event = asyncio.Event()
     if state.get("cancel_requested"):
         cancel_event.set()
     
-    result = await agent.run(
-        state["user_id"],
-        state.get("hotel_input", {}),
-        progress_cb,
-        cancel_event
-    )
-    
-    return {
-        **state,
-        "hotel_results": result,
-        "status": "hotel_completed" if result.get("status") == "completed" else "hotel_partial"
-    }
+    try:
+        result = await agent.run(
+            state["user_id"],
+            state.get("hotel_input", {}),
+            progress_cb,
+            cancel_event
+        )
+        
+        # Check for cancellation after agent completes
+        if state.get("cancel_requested") or result.get("status") == "cancelled":
+            return {
+                **state,
+                "hotel_results": result,
+                "status": "hotel_cancelled",
+                "current_agent": "hotel"
+            }
+        
+        return {
+            **state,
+            "hotel_results": result,
+            "status": "hotel_completed" if result.get("status") == "completed" else "hotel_partial",
+            "current_agent": "hotel"
+        }
+        
+    except asyncio.CancelledError:
+        # Preserve partial results on cancellation
+        last_partial = partial_results[-1] if partial_results else {}
+        return {
+            **state,
+            "hotel_results": {"status": "cancelled", "partial": last_partial},
+            "status": "hotel_cancelled",
+            "current_agent": "hotel"
+        }
 
 
 def response_assembler_node(state: AgentState) -> AgentState:
-    """Assemble final response from agent results."""
+    """Assemble final response from agent results.
+    
+    Handles both completed and cancelled/partial results, providing
+    meaningful feedback about what was accomplished before interruption.
+    """
     import json
     
     response_data = {}
+    status_messages = []
     
+    # Check for previous context
+    if state.get("previous_context"):
+        prev_ctx = state["previous_context"]
+        status_messages.append(
+            f"Continuing from previous query: '{prev_ctx.get('previous_query', 'N/A')}'"
+        )
+    
+    # Handle flight results
     if state.get("flight_results"):
         flight_data = state["flight_results"]
         if flight_data.get("status") == "completed":
             results = flight_data.get("results", [])
             response_data["flights"] = results
+            status_messages.append(f"Found {len(results)} flight options")
         elif flight_data.get("status") == "cancelled":
-            response_data["flight_status"] = f"Cancelled (partial: {flight_data.get('partial', {})})"
+            partial = flight_data.get("partial", {})
+            response_data["flight_status"] = "interrupted"
+            response_data["flight_partial"] = partial
+            status_messages.append(
+                f"Flight search interrupted (partial results available)"
+            )
+        else:
+            # Partial or other status
+            response_data["flight_status"] = flight_data.get("status", "unknown")
+            response_data["flight_partial"] = flight_data.get("partial", {})
     
+    # Handle hotel results
     if state.get("hotel_results"):
         hotel_data = state["hotel_results"]
         if hotel_data.get("status") == "completed":
             results = hotel_data.get("results", [])
             response_data["hotels"] = results
+            status_messages.append(f"Found {len(results)} hotel options")
         elif hotel_data.get("status") == "cancelled":
-            response_data["hotel_status"] = f"Cancelled (partial: {hotel_data.get('partial', {})})"
+            partial = hotel_data.get("partial", {})
+            response_data["hotel_status"] = "interrupted"
+            response_data["hotel_partial"] = partial
+            status_messages.append(
+                f"Hotel search interrupted (partial results available)"
+            )
+        else:
+            response_data["hotel_status"] = hotel_data.get("status", "unknown")
+            response_data["hotel_partial"] = hotel_data.get("partial", {})
     
-    # Convert to JSON string so frontend can parse it
-    final_response = json.dumps(response_data) if response_data else "No results available."
+    # Build final response
+    if response_data:
+        response_data["summary"] = " | ".join(status_messages) if status_messages else "Search completed"
+        final_response = json.dumps(response_data, indent=2)
+    else:
+        final_response = json.dumps({
+            "message": "No results available.",
+            "status": state.get("status", "unknown")
+        })
     
     return {
         **state,
