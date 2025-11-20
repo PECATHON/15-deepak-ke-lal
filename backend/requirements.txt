@@ -1,0 +1,11 @@
+# Core async dependencies
+asyncio>=3.4.3
+
+# HTTP client for API calls
+httpx>=0.27.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Logging (built-in, no install needed)
+# threading (built-in, no install needed)
