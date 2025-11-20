@@ -12,6 +12,66 @@ except ImportError:
     from config import config
 
 
+# City name to IATA code mapping
+CITY_TO_IATA = {
+    # US Cities
+    "nyc": "JFK", "new york": "JFK", "newyork": "JFK",
+    "los angeles": "LAX", "la": "LAX", "losangeles": "LAX",
+    "chicago": "ORD",
+    "san francisco": "SFO", "sf": "SFO", "sanfrancisco": "SFO",
+    "miami": "MIA",
+    "boston": "BOS",
+    "seattle": "SEA",
+    "las vegas": "LAS", "vegas": "LAS", "lasvegas": "LAS",
+    "washington": "DCA", "dc": "DCA",
+    
+    # International
+    "london": "LHR",
+    "paris": "CDG",
+    "tokyo": "NRT",
+    "dubai": "DXB",
+    "singapore": "SIN",
+    "hong kong": "HKG", "hongkong": "HKG",
+    "sydney": "SYD",
+    
+    # Indian Cities
+    "mumbai": "BOM",
+    "delhi": "DEL", "newdelhi": "DEL", "new delhi": "DEL",
+    "bangalore": "BLR", "bengaluru": "BLR",
+    "chandigarh": "IXC", "chd": "IXC",
+    "hyderabad": "HYD",
+    "chennai": "MAA",
+    "kolkata": "CCU",
+    "pune": "PNQ",
+    "ahmedabad": "AMD",
+    "goa": "GOI",
+    "jaipur": "JAI",
+    "kochi": "COK", "cochin": "COK",
+    "lucknow": "LKO",
+    "indore": "IDR",
+    "bhopal": "BHO",
+}
+
+
+def normalize_airport_code(location: str) -> str:
+    """Convert city name to IATA code or return as-is if already valid."""
+    if not location:
+        return ""
+    
+    location_lower = location.lower().strip()
+    
+    # Check if it's already a 3-letter IATA code
+    if len(location) == 3 and location.isalpha():
+        return location.upper()
+    
+    # Try to find in mapping
+    if location_lower in CITY_TO_IATA:
+        return CITY_TO_IATA[location_lower]
+    
+    # Default: take first 3 letters and uppercase
+    return location[:3].upper()
+
+
 class AmadeusFlightAPI:
     """Amadeus Flight API integration."""
     
@@ -46,17 +106,21 @@ class AmadeusFlightAPI:
         """Search flights using Amadeus API."""
         token = await self.get_access_token()
         
-        # Default to tomorrow if no date provided
-        if not date:
-            date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        # Normalize airport codes
+        origin_code = normalize_airport_code(origin)
+        dest_code = normalize_airport_code(destination)
         
-        async with httpx.AsyncClient() as client:
+        # Default to 7 days from now if no date provided
+        if not date:
+            date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(
                 f"https://{self.hostname}/v2/shopping/flight-offers",
                 headers={"Authorization": f"Bearer {token}"},
                 params={
-                    "originLocationCode": origin.upper()[:3],
-                    "destinationLocationCode": destination.upper()[:3],
+                    "originLocationCode": origin_code,
+                    "destinationLocationCode": dest_code,
                     "departureDate": date,
                     "adults": adults,
                     "max": 5  # Limit results
@@ -64,7 +128,7 @@ class AmadeusFlightAPI:
             )
             
             if response.status_code != 200:
-                raise Exception(f"Amadeus API error: {response.text}")
+                raise Exception(f"Amadeus API error ({response.status_code}): {response.text}")
             
             data = response.json()
             flights = []
