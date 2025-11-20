@@ -178,3 +178,94 @@ class StateStore:
         """
         with self._lock:
             return list(self._store.keys())
+    
+    def get_partial_data_only(self, request_id: str, agent: str) -> List[Any]:
+        """
+        Retrieve only the data payloads (without metadata) for an agent.
+        Useful for interruption continuation.
+        
+        Args:
+            request_id: Unique request identifier
+            agent: Agent name
+            
+        Returns:
+            List of data payloads from partials
+        """
+        with self._lock:
+            partials = self.get_all_partials(request_id)
+            if agent in partials:
+                return [p["data"] for p in partials[agent]]
+            return []
+    
+    def get_agents_for_request(self, request_id: str) -> List[str]:
+        """
+        Get list of all agents that have data for a request.
+        
+        Args:
+            request_id: Unique request identifier
+            
+        Returns:
+            List of agent names
+        """
+        with self._lock:
+            if request_id in self._store:
+                return list(self._store[request_id].keys())
+            return []
+    
+    def get_agent_state(self, request_id: str, agent: str) -> Optional[Dict[str, Any]]:
+        """
+        Get complete state for a specific agent in a request.
+        
+        Args:
+            request_id: Unique request identifier
+            agent: Agent name
+            
+        Returns:
+            Agent state dict or None if not found
+        """
+        with self._lock:
+            if request_id in self._store and agent in self._store[request_id]:
+                return self._store[request_id][agent]
+            return None
+    
+    def mark_completed(self, request_id: str, agent: str):
+        """
+        Mark an agent's execution as successfully completed.
+        
+        Args:
+            request_id: Unique request identifier
+            agent: Agent name
+        """
+        with self._lock:
+            if request_id in self._store and agent in self._store[request_id]:
+                self._store[request_id][agent]["metadata"]["status"] = "completed"
+                self._store[request_id][agent]["metadata"]["completed_at"] = datetime.utcnow().isoformat()
+                logger.info(f"[StateStore] Marked {request_id}/{agent} as completed")
+    
+    def mark_error(self, request_id: str, agent: str, error: str):
+        """
+        Mark an agent's execution as failed with error.
+        
+        Args:
+            request_id: Unique request identifier
+            agent: Agent name
+            error: Error message
+        """
+        with self._lock:
+            if request_id not in self._store:
+                self._store[request_id] = {}
+            
+            if agent not in self._store[request_id]:
+                self._store[request_id][agent] = {
+                    "partials": [],
+                    "cancelled": False,
+                    "cancelled_at": None,
+                    "metadata": {}
+                }
+            
+            self._store[request_id][agent]["metadata"]["status"] = "error"
+            self._store[request_id][agent]["metadata"]["error"] = error
+            self._store[request_id][agent]["metadata"]["error_at"] = datetime.utcnow().isoformat()
+            
+            logger.error(f"[StateStore] Marked {request_id}/{agent} as error: {error}")
+
