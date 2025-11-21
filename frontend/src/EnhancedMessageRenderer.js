@@ -1,4 +1,5 @@
 import React from 'react';
+import ReactMarkdown from 'react-markdown';
 import './EnhancedChat.css';
 
 /**
@@ -22,12 +23,20 @@ const EnhancedMessageRenderer = ({ content }) => {
     data = JSON.parse(content);
     isJSON = true;
   } catch {
-    // Not JSON, render as plain text
-    return <div className="message-text">{content}</div>;
+    // Not JSON, render as markdown
+    return (
+      <div className="message-text">
+        <ReactMarkdown>{content}</ReactMarkdown>
+      </div>
+    );
   }
   
   if (!isJSON || !data.success) {
-    return <div className="message-text">{content}</div>;
+    return (
+      <div className="message-text">
+        <ReactMarkdown>{content}</ReactMarkdown>
+      </div>
+    );
   }
   
   // Render based on content type
@@ -41,7 +50,11 @@ const EnhancedMessageRenderer = ({ content }) => {
     return <UserPreferences data={data} />;
   }
   
-  return <div className="message-text">{content}</div>;
+  return (
+    <div className="message-text">
+      <ReactMarkdown>{content}</ReactMarkdown>
+    </div>
+  );
 };
 
 // Flight Results Component

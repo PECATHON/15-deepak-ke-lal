@@ -51,6 +51,8 @@ class TravelPlanningState(TypedDict):
     # Agent execution
     flight_results: Optional[Dict[str, Any]]
     hotel_results: Optional[Dict[str, Any]]
+    current_agent: Optional[str]  # Track which agent is currently active
+    agent_status: str  # Track agent execution status
     
     # Interruption handling
     is_cancelled: bool
@@ -154,6 +156,10 @@ class LangGraphCoordinator:
         """
         logger.info(f"[IntentNode] Processing query: {state['user_query']}")
         
+        # Update agent status
+        state['current_agent'] = 'IntentDetector'
+        state['agent_status'] = 'Understanding your travel needs...'
+        
         # Use existing intent detector
         intent_result = self.intent_detector.detect(state['user_query'])
         
@@ -161,6 +167,7 @@ class LangGraphCoordinator:
         state['confidence'] = intent_result['confidence']
         state['extracted_params'] = intent_result['params']
         state['current_step'] = 'intent_detected'
+        state['agent_status'] = f"Detected intent: {', '.join(intent_result['intents'])}"
         
         # Add to conversation history
         state['conversation_history'].append({
@@ -205,6 +212,10 @@ class LangGraphCoordinator:
         """
         logger.info("[FlightNode] Executing FlightAgent")
         
+        # Update state to show flight agent is active
+        state['current_agent'] = 'FlightAgent'
+        state['agent_status'] = 'Searching for flights...'
+        
         try:
             # Extract flight parameters
             params = state['extracted_params']
@@ -222,6 +233,7 @@ class LangGraphCoordinator:
             
             state['flight_results'] = result
             state['current_step'] = 'flight_complete'
+            state['agent_status'] = 'Flight search completed'
             
             # Update conversation history
             state['conversation_history'].append({
@@ -245,6 +257,10 @@ class LangGraphCoordinator:
         """
         logger.info("[HotelNode] Executing HotelAgent")
         
+        # Update state to show hotel agent is active
+        state['current_agent'] = 'HotelAgent'
+        state['agent_status'] = 'Searching for hotels...'
+        
         try:
             params = state['extracted_params']
             
@@ -261,6 +277,7 @@ class LangGraphCoordinator:
             
             state['hotel_results'] = result
             state['current_step'] = 'hotel_complete'
+            state['agent_status'] = 'Hotel search completed'
             
             state['conversation_history'].append({
                 'timestamp': datetime.now().isoformat(),
@@ -411,6 +428,8 @@ class LangGraphCoordinator:
             'extracted_params': {},
             'flight_results': None,
             'hotel_results': None,
+            'current_agent': 'IntentDetector',
+            'agent_status': 'Analyzing your request...',
             'is_cancelled': False,
             'partial_results': {},
             'conversation_history': [],

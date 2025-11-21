@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { IoChatbubbles, IoCalendar, IoBook, IoNotifications, IoBulb, IoPeople, IoArrowForward } from 'react-icons/io5';
+import { IoChatbubbles, IoCalendar, IoBook, IoNotifications, IoBulb, IoPeople, IoArrowForward, IoCamera, IoHeart, IoStar } from 'react-icons/io5';
 import './Home.css';
 
 const Home = () => {
@@ -89,22 +89,72 @@ const Home = () => {
             Your intelligent travel companion for flights, hotels, destinations, and more.
           </motion.p>
 
-          {/* Single centered CTA */}
+          {/* Floating Action Icons */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 1, delay: 0.4 }}
+            className="floating-icons"
+          >
+            <motion.div
+              animate={{ y: [-10, 10, -10] }}
+              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+              className="floating-icon"
+              style={{ left: '10%', top: '20%' }}
+            >
+              <IoStar size={24} />
+            </motion.div>
+            <motion.div
+              animate={{ y: [10, -10, 10] }}
+              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
+              className="floating-icon"
+              style={{ right: '15%', top: '30%' }}
+            >
+              <IoBook size={22} />
+            </motion.div>
+            <motion.div
+              animate={{ y: [-5, 15, -5] }}
+              transition={{ duration: 5, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+              className="floating-icon"
+              style={{ left: '20%', bottom: '30%' }}
+            >
+              <IoCamera size={20} />
+            </motion.div>
+            <motion.div
+              animate={{ y: [15, -5, 15] }}
+              transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut", delay: 1.5 }}
+              className="floating-icon"
+              style={{ right: '20%', bottom: '20%' }}
+            >
+              <IoHeart size={26} />
+            </motion.div>
+          </motion.div>
+
+          {/* Enhanced CTA with quick actions */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.3 }}
-            className="cta-single"
+            className="cta-enhanced"
           >
             <motion.button
-              whileHover={{ y: -2 }}
+              whileHover={{ y: -3, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="btn-primary btn-centered"
+              className="btn-primary btn-main btn-enhanced ripple pulse"
               onClick={() => navigate('/chat')}
+              aria-label="Start planning your travel journey with Ava"
+              role="button"
             >
-              <IoChatbubbles size={20} />
-              Start Planning
-              <IoArrowForward size={20} />
+              <div className="btn-content">
+                <IoChatbubbles size={22} />
+                <span>Start Planning Your Journey</span>
+                <IoArrowForward size={18} />
+              </div>
+              <motion.div
+                className="btn-glow"
+                animate={{ scale: [1, 1.2, 1] }}
+                transition={{ duration: 2, repeat: Infinity }}
+              />
             </motion.button>
           </motion.div>
         </motion.div>

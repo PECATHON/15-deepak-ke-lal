@@ -74,6 +74,70 @@
 }
 
 /* CTA Buttons */
+/* Floating Icons */
+.floating-icons {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.floating-icon {
+  position: absolute;
+  color: rgba(34, 211, 238, 0.3);
+  pointer-events: none;
+  filter: blur(0.5px);
+}
+
+/* Enhanced CTA */
+.cta-enhanced {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  margin-top: 2.5rem;
+  position: relative;
+  z-index: 1;
+}
+
+.btn-main {
+  position: relative;
+  min-width: 320px;
+  padding: 1.5rem 3rem;
+  background: linear-gradient(135deg, #2b5278 0%, #3a6a8f 100%);
+  border-radius: 1rem;
+  overflow: hidden;
+}
+
+.btn-main:hover {
+  background: linear-gradient(135deg, #3a6a8f 0%, #4a7aa0 100%);
+}
+
+.btn-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 1.2rem;
+  font-weight: 600;
+  position: relative;
+  z-index: 2;
+}
+
+.btn-glow {
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.3), rgba(59, 130, 246, 0.3));
+  border-radius: 1rem;
+  z-index: 0;
+  opacity: 0.5;
+}
+
 /* Single CTA container */
 .cta-single {
   display: flex;

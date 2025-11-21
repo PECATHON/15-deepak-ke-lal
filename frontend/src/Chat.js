@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
+import { IoSend, IoMic, IoStop, IoRefresh, IoSparkles } from 'react-icons/io5';
+import ReactMarkdown from 'react-markdown';
 import EnhancedMessageRenderer from './EnhancedMessageRenderer';
 import './App.css';
 import './EnhancedChat.css';
@@ -311,36 +313,110 @@ function Chat() {
           >
             <div className="input-area">
               <div className="input-wrapper">
-                <textarea
+                <motion.textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder="Message..."
+                  placeholder="Ask about flights, hotels, or travel plans..."
                   disabled={isProcessing}
                   rows="1"
+                  className="chat-input"
+                  initial={{ scale: 0.98 }}
+                  whileFocus={{ scale: 1 }}
+                  transition={{ duration: 0.2 }}
                 />
-                <button
-                  onClick={sendMessage}
-                  disabled={!input.trim() || isProcessing}
-                  className="send-button"
-                  title="Send message"
-                >
-                  {isProcessing ? '⏳' : '↑'}
-                </button>
-              </div>
-              <AnimatePresence>
-                {isProcessing && (
+                <div className="input-actions">
                   <motion.button
-                    onClick={interruptTask}
-                    className="interrupt-button-small"
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
+                    onClick={sendMessage}
+                    disabled={!input.trim() || isProcessing}
+                    className="send-button"
+                    title="Send message"
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
                   >
-                    Stop
+                    {isProcessing ? (
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      >
+                        <IoRefresh size={18} />
+                      </motion.div>
+                    ) : (
+                      <IoSend size={18} />
+                    )}
                   </motion.button>
-                )}
-              </AnimatePresence>
+                </div>
+              </div>
+              
+              <div className="input-footer">
+                <AnimatePresence>
+                  {isProcessing && (
+                    <motion.button
+                      onClick={interruptTask}
+                      className="interrupt-button"
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.8 }}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      <IoStop size={14} />
+                      Stop Generation
+                    </motion.button>
+                  )}
+                </AnimatePresence>
+                
+                <motion.div
+                  className="status-indicator"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: status.state === 'idle' ? 0 : 1 }}
+                >
+                  <motion.div
+                    className="status-icon"
+                    animate={{ rotate: status.state === 'thinking' || status.state === 'searching' ? 360 : 0 }}
+                    transition={{
+                      duration: 2,
+                      repeat: status.state === 'thinking' || status.state === 'searching' ? Infinity : 0,
+                      ease: "linear"
+                    }}
+                  >
+                    <IoSparkles size={12} />
+                  </motion.div>
+                  <div className="status-content">
+                    <div className="status-main">
+                      <span className="status-text">
+                        {status.state === 'idle' ? 'Ready' : 
+                         status.state === 'processing' ? 'Processing your request...' :
+                         status.state === 'thinking' ? 'Analyzing your query...' :
+                         status.state === 'searching' ? 'Searching for results...' :
+                         status.state === 'completed' ? 'Search completed!' :
+                         status.state}
+                      </span>
+                    </div>
+                    {status.agent && status.state !== 'idle' && (
+                      <motion.div
+                        className="agent-info"
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.3 }}
+                      >
+                        <div className="agent-badge">
+                          {status.agent}
+                        </div>
+                        <div className="agent-description">
+                          {status.agent === 'Flight Search Agent' ? 'Finding the best flights for you' :
+                           status.agent === 'Hotel Search Agent' ? 'Searching for accommodation options' :
+                           status.agent === 'Multi-Service Agent' ? 'Searching flights and hotels' :
+                           status.agent === 'Booking Agent' ? 'Processing your booking request' :
+                           status.agent === 'Travel Assistant AI' ? 'Understanding your travel needs' :
+                           status.agent === 'ReAct Agent' ? 'Planning your travel itinerary' :
+                           'Working on your request'}
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+                </motion.div>
+              </div>
             </div>
           </motion.div>
         </div>

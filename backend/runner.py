@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 from typing import Dict, Any
+from datetime import datetime
 
 from langchain_core.messages import HumanMessage, AIMessage
 
@@ -64,6 +65,17 @@ class AgentManager:
             """Execute the workflow with interruption support."""
             try:
                 print(f"🚀 Starting workflow for user {user_id}, message: {message}")
+                
+                # Send initial status via WebSocket
+                if self._ws_manager:
+                    await self._ws_manager.send_message(user_id, {
+                        "type": "status_update",
+                        "task_id": task_id,
+                        "status": "processing",
+                        "current_agent": "ReAct Agent",
+                        "timestamp": datetime.now().isoformat()
+                    })
+                
                 # Update status to running
                 await self._interruption_manager.update_task_status(
                     user_id, TaskStatus.RUNNING
@@ -110,6 +122,16 @@ class AgentManager:
                 print(f"   Initial state: {initial_state}")
                 print(f"   Config: {config}")
                 
+                # Send agent execution status
+                if self._ws_manager:
+                    await self._ws_manager.send_message(user_id, {
+                        "type": "status_update",
+                        "task_id": task_id,
+                        "status": "thinking",
+                        "current_agent": "Travel Assistant AI",
+                        "timestamp": datetime.now().isoformat()
+                    })
+                
                 # Run the ReAct agent
                 result = await asyncio.to_thread(
                     self._agent.invoke,
@@ -126,8 +148,58 @@ class AgentManager:
                 final_messages = result.get("messages", [])
                 response = final_messages[-1].content if final_messages else "No response generated"
                 
+                # Analyze messages to detect tool usage and send appropriate status updates
+                if self._ws_manager:
+                    current_agent = "Travel Assistant AI"
+                    
+                    for msg in final_messages:
+                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                            for tool_call in msg.tool_calls:
+                                tool_name = tool_call.get('name', '')
+                                if 'flight' in tool_name.lower():
+                                    current_agent = "Flight Search Agent"
+                                    await self._ws_manager.send_message(user_id, {
+                                        "type": "status_update",
+                                        "task_id": task_id,
+                                        "status": "searching",
+                                        "current_agent": current_agent,
+                                        "timestamp": datetime.now().isoformat()
+                                    })
+                                elif 'hotel' in tool_name.lower():
+                                    current_agent = "Hotel Search Agent"
+                                    await self._ws_manager.send_message(user_id, {
+                                        "type": "status_update",
+                                        "task_id": task_id,
+                                        "status": "searching",
+                                        "current_agent": current_agent,
+                                        "timestamp": datetime.now().isoformat()
+                                    })
+                                elif 'booking' in tool_name.lower():
+                                    current_agent = "Booking Agent"
+                                    await self._ws_manager.send_message(user_id, {
+                                        "type": "status_update",
+                                        "task_id": task_id,
+                                        "status": "processing",
+                                        "current_agent": current_agent,
+                                        "timestamp": datetime.now().isoformat()
+                                    })
+                
                 # Save to conversation history
                 await self._store.append_message(user_id, "assistant", response)
+                
+                # Analyze response content to determine final agent status
+                final_agent = "Travel Assistant AI"
+                if self._ws_manager:
+                    response_lower = response.lower()
+                    if any(word in response_lower for word in ['flight', 'airline', 'departure', 'arrival']):
+                        if any(word in response_lower for word in ['hotel', 'accommodation', 'stay', 'room']):
+                            final_agent = "Multi-Service Agent"
+                        else:
+                            final_agent = "Flight Search Agent"
+                    elif any(word in response_lower for word in ['hotel', 'accommodation', 'stay', 'room']):
+                        final_agent = "Hotel Search Agent"
+                    elif any(word in response_lower for word in ['book', 'reservation', 'confirm']):
+                        final_agent = "Booking Agent"
                 
                 # Mark task as completed
                 await self._interruption_manager.complete_task(
@@ -143,7 +215,9 @@ class AgentManager:
                         "type": "response",
                         "task_id": task_id,
                         "status": "completed",
-                        "response": response
+                        "current_agent": final_agent,
+                        "response": response,
+                        "timestamp": datetime.now().isoformat()
                     })
                     print(f"✅ WebSocket message sent!")
                 else:
