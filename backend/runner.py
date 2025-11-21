@@ -114,7 +114,8 @@ class AgentManager:
                 config = {
                     "configurable": {
                         "thread_id": thread_id
-                    }
+                    },
+                    "recursion_limit": 10  # Limit recursion to prevent infinite loops
                 }
                 
                 print(f"🤖 Invoking ReAct agent...")

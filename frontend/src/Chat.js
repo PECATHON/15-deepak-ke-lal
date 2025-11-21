@@ -11,8 +11,9 @@ const API_BASE = 'http://localhost:8000';
 const WS_BASE = 'ws://localhost:8000';
 
 // Typing indicator: single horizontal line with three animated dots
-const TypingIndicator = () => (
+const TypingIndicator = React.forwardRef((props, ref) => (
   <motion.div
+    ref={ref}
     className="message message-assistant"
     initial={{ opacity: 0, y: 20 }}
     animate={{ opacity: 1, y: 0 }}
@@ -35,7 +36,7 @@ const TypingIndicator = () => (
       </div>
     </div>
   </motion.div>
-);
+));
 
 function Chat() {
   const [messages, setMessages] = useState([]);

@@ -134,7 +134,7 @@
 
 /* Flight and hotel cards */
 .flight-card, .hotel-card {
-  background: rgba(26, 29, 33, 0.8);
+  background: rgba(176, 176, 176, 0.8);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 0.875rem;
   padding: 1.25rem;

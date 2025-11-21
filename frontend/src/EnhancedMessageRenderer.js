@@ -118,44 +118,65 @@ const FlightResults = ({ data }) => {
 const SingleFlight = ({ flight, userClass = 'Economy' }) => {
   const price = flight.prices?.[userClass] || flight.prices?.Economy || 0;
   
+  // Handle simple flight format (no legs structure)
+  const isSimpleFormat = !flight.legs;
+  
   return (
     <div className="flight-details">
       <div className="flight-header">
-        <h4>{flight.type === 'direct' ? '🎯 Direct Flight' : `🔄 ${flight.layovers}-Stop Flight`}</h4>
-        <div className="flight-price">₹{price.toLocaleString()}</div>
+        <h4>{flight.type === 'direct' ? '🎯 Direct Flight' : isSimpleFormat ? '✈️ Flight' : `🔄 ${flight.layovers}-Stop Flight`}</h4>
+        <div className="flight-price">{flight.price || `₹${price.toLocaleString()}`}</div>
       </div>
       
-      {/* Flight Legs */}
-      <div className="flight-legs">
-        {flight.legs.map((leg, idx) => (
-          <div key={idx} className="flight-leg">
-            <div className="leg-header">
-              ✈️ Leg {leg.leg_number}: {leg.airline} {leg.flight_number}
-            </div>
-            <div className="leg-details">
-              <div><strong>From:</strong> {leg.origin}</div>
-              <div><strong>To:</strong> {leg.destination}</div>
-              <div><strong>Departure:</strong> {leg.departure_time}</div>
-              <div><strong>Arrival:</strong> {leg.arrival_time}</div>
-              <div><strong>Duration:</strong> {leg.duration}</div>
-              <div><strong>Aircraft:</strong> {leg.aircraft}</div>
-            </div>
+      {/* Simple Flight Info (for basic mock data) */}
+      {isSimpleFormat && (
+        <div className="flight-leg">
+          <div className="leg-header">
+            ✈️ {flight.airline} {flight.flight_number}
           </div>
-        ))}
-      </div>
+          <div className="leg-details">
+            {flight.departure && <div><strong>Departure:</strong> {flight.departure}</div>}
+            {flight.arrival && <div><strong>Arrival:</strong> {flight.arrival}</div>}
+            {flight.duration && <div><strong>Duration:</strong> {flight.duration}</div>}
+            {flight.stops && <div><strong>Stops:</strong> {flight.stops}</div>}
+            {flight.class && <div><strong>Class:</strong> {flight.class}</div>}
+          </div>
+        </div>
+      )}
+      
+      {/* Flight Legs (for enhanced format) */}
+      {!isSimpleFormat && flight.legs && (
+        <div className="flight-legs">
+          {flight.legs.map((leg, idx) => (
+            <div key={idx} className="flight-leg">
+              <div className="leg-header">
+                ✈️ Leg {leg.leg_number}: {leg.airline} {leg.flight_number}
+              </div>
+              <div className="leg-details">
+                <div><strong>From:</strong> {leg.origin}</div>
+                <div><strong>To:</strong> {leg.destination}</div>
+                <div><strong>Departure:</strong> {leg.departure_time}</div>
+                <div><strong>Arrival:</strong> {leg.arrival_time}</div>
+                <div><strong>Duration:</strong> {leg.duration}</div>
+                <div><strong>Aircraft:</strong> {leg.aircraft}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       
       {/* Layover Info */}
       {flight.layover_info && flight.layover_info.length > 0 && (
         <div className="layover-info">
           <strong>⏱️ Layover:</strong> {flight.layover_info[0].airport} - {flight.layover_info[0].duration}
           <div style={{fontSize: '12px', marginTop: '5px'}}>
-            Facilities: {flight.layover_info[0].facilities.join(', ')}
+            Facilities: {flight.layover_info[0].facilities?.join(', ')}
           </div>
         </div>
       )}
       
       {/* Price Comparison */}
-      {flight.providers && (
+      {flight.providers && flight.providers.length > 0 && (
         <div>
           <div style={{fontWeight: 'bold', margin: '10px 0 5px 0'}}>💳 Price Comparison:</div>
           <div className="price-comparison">
@@ -176,7 +197,7 @@ const SingleFlight = ({ flight, userClass = 'Economy' }) => {
       )}
       
       {/* Amenities */}
-      {flight.amenities && (
+      {flight.amenities && flight.amenities.length > 0 && (
         <div className="amenities">
           {flight.amenities.map((amenity, idx) => (
             <span key={idx} className="amenity-badge">{amenity}</span>
@@ -267,9 +288,13 @@ const HotelResults = ({ data }) => {
         <div key={idx} className="hotel-card">
           <div className="hotel-header">
             <h4>{hotel.name}</h4>
-            <div className="star-rating">
-              {'⭐'.repeat(hotel.stars)} ({hotel.rating})
-            </div>
+            {hotel.stars ? (
+              <div className="star-rating">
+                {'⭐'.repeat(hotel.stars)} ({hotel.rating})
+              </div>
+            ) : hotel.rating ? (
+              <div className="star-rating">⭐ {hotel.rating}</div>
+            ) : null}
           </div>
           
           {/* Images */}
@@ -281,29 +306,41 @@ const HotelResults = ({ data }) => {
             </div>
           )}
           
-          <div><strong>📍 Location:</strong> {hotel.location}</div>
-          <div><strong>👥 Reviews:</strong> {hotel.reviews.toLocaleString()}</div>
+          <div><strong>📍 Location:</strong> {hotel.location || hotel.address}</div>
+          {hotel.reviews && <div><strong>👥 Reviews:</strong> {hotel.reviews.toLocaleString()}</div>}
           {hotel.review_snippet && <div style={{fontStyle: 'italic', color: '#666', margin: '5px 0'}}>"{hotel.review_snippet}"</div>}
           
-          {/* Price Comparison */}
-          <div style={{fontWeight: 'bold', margin: '10px 0 5px 0'}}>💳 Price per night:</div>
-          <div className="price-comparison">
-            {Object.entries(hotel.prices_per_night).map(([provider, price]) => (
-              <a 
-                key={provider}
-                href={hotel.booking_links?.[provider] || '#'}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`provider-card ${provider === hotel.cheapest_provider ? 'cheapest' : ''}`}
-              >
-                <div className="provider-name">{provider}</div>
-                <div className="provider-price">₹{price.toLocaleString()}</div>
-              </a>
-            ))}
-          </div>
+          {/* Price Comparison or Simple Price */}
+          {hotel.prices_per_night ? (
+            <>
+              <div style={{fontWeight: 'bold', margin: '10px 0 5px 0'}}>💳 Price per night:</div>
+              <div className="price-comparison">
+                {Object.entries(hotel.prices_per_night).map(([provider, price]) => (
+                  <a 
+                    key={provider}
+                    href={hotel.booking_links?.[provider] || '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`provider-card ${provider === hotel.cheapest_provider ? 'cheapest' : ''}`}
+                  >
+                    <div className="provider-name">{provider}</div>
+                    <div className="provider-price">₹{price.toLocaleString()}</div>
+                  </a>
+                ))}
+              </div>
+            </>
+          ) : hotel.price_per_night ? (
+            <div style={{fontWeight: 'bold', margin: '10px 0'}}>
+              💰 Price: {hotel.price_per_night}
+            </div>
+          ) : hotel.price ? (
+            <div style={{fontWeight: 'bold', margin: '10px 0'}}>
+              💰 Price: {typeof hotel.price === 'number' ? `₹${hotel.price}` : hotel.price}
+            </div>
+          ) : null}
           
           {/* Amenities */}
-          {hotel.amenities && (
+          {hotel.amenities && hotel.amenities.length > 0 && (
             <div className="amenities">
               {hotel.amenities.map((amenity, idx) => (
                 <span key={idx} className="amenity-badge">{amenity}</span>

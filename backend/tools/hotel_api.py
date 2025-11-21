@@ -91,15 +91,24 @@ class AmadeusHotelAPI:
                 hotel_info = offer.get("hotel", {})
                 best_offer = offer.get("offers", [{}])[0]
                 
+                # Generate hotel images using Unsplash with hotel name and location
+                hotel_name = hotel_info.get("name", "Unknown Hotel")
+                images = [
+                    f"https://source.unsplash.com/800x600/?hotel,{hotel_name.replace(' ', ',')}",
+                    f"https://source.unsplash.com/800x600/?luxury,hotel,room",
+                    f"https://source.unsplash.com/800x600/?hotel,{city_code},interior"
+                ]
+                
                 hotels.append({
-                    "name": hotel_info.get("name", "Unknown Hotel"),
+                    "name": hotel_name,
                     "rating": hotel_info.get("rating", "N/A"),
                     "price": float(best_offer.get("price", {}).get("total", 0)),
                     "currency": best_offer.get("price", {}).get("currency", "USD"),
                     "location": hotel_info.get("cityCode", city_code),
                     "address": hotel_info.get("address", {}).get("lines", [""])[0],
                     "checkin": checkin,
-                    "checkout": checkout
+                    "checkout": checkout,
+                    "images": images
                 })
             
             return hotels
@@ -173,6 +182,10 @@ class RapidAPIBookingHotels:
             hotels = []
             
             for hotel in data.get("result", [])[:5]:
+                # Extract image URL from max_photo_url or main_photo_url
+                image_url = hotel.get("max_photo_url", hotel.get("main_photo_url", ""))
+                images = [image_url] if image_url else []
+                
                 hotels.append({
                     "name": hotel.get("hotel_name", "Unknown Hotel"),
                     "rating": hotel.get("review_score", "N/A"),
@@ -181,7 +194,9 @@ class RapidAPIBookingHotels:
                     "location": location,
                     "address": hotel.get("address", ""),
                     "checkin": checkin,
-                    "checkout": checkout
+                    "checkout": checkout,
+                    "images": images,
+                    "review_count": hotel.get("review_nr", 0)
                 })
             
             return hotels
@@ -218,6 +233,18 @@ class SerpAPIHotelSearch:
             hotels = []
             
             for hotel in data.get("properties", [])[:5]:
+                # Extract images from SerpAPI response
+                images_data = hotel.get("images", [])
+                images = [img.get("thumbnail", img.get("original", "")) for img in images_data[:3]] if images_data else []
+                
+                # Fallback to Unsplash if no images
+                if not images:
+                    hotel_name = hotel.get("name", "hotel")
+                    images = [
+                        f"https://source.unsplash.com/800x600/?hotel,{hotel_name.replace(' ', ',')}",
+                        f"https://source.unsplash.com/800x600/?luxury,hotel,{location}"
+                    ]
+                
                 hotels.append({
                     "name": hotel.get("name", "Unknown Hotel"),
                     "rating": hotel.get("overall_rating", "N/A"),
@@ -226,7 +253,8 @@ class SerpAPIHotelSearch:
                     "location": location,
                     "address": hotel.get("description", ""),
                     "checkin": checkin,
-                    "checkout": checkout
+                    "checkout": checkout,
+                    "images": images
                 })
             
             return hotels
@@ -254,7 +282,12 @@ async def _mock_hotel_search(input_data: dict):
             "location": location,
             "address": "123 Main St",
             "checkin": "2025-12-01",
-            "checkout": "2025-12-03"
+            "checkout": "2025-12-03",
+            "images": [
+                "https://source.unsplash.com/800x600/?hotel,luxury,modern",
+                "https://source.unsplash.com/800x600/?hotel,room,bed",
+                "https://source.unsplash.com/800x600/?hotel,pool,resort"
+            ]
         },
         {
             "name": "Sample Suites",
@@ -264,7 +297,12 @@ async def _mock_hotel_search(input_data: dict):
             "location": location,
             "address": "456 Park Ave",
             "checkin": "2025-12-01",
-            "checkout": "2025-12-03"
+            "checkout": "2025-12-03",
+            "images": [
+                "https://source.unsplash.com/800x600/?luxury,suite,hotel",
+                "https://source.unsplash.com/800x600/?hotel,interior,elegant",
+                "https://source.unsplash.com/800x600/?hotel,view,city"
+            ]
         },
     ]
 

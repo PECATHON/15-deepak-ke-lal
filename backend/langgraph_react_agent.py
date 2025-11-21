@@ -132,14 +132,15 @@ def search_flights(query: str) -> str:
                         })
                 
                 if flights:
-                    return json.dumps({
+                    # Return dict, not JSON string to avoid double escaping
+                    return {
                         "success": True,
                         "query": query,
                         "flights": flights,
                         "total_results": len(flights),
                         "timestamp": datetime.now().isoformat(),
                         "source": "Google Search (SerpAPI - Real Data)"
-                    }, indent=2)
+                    }
                     
             except Exception as e:
                 print(f"⚠️  SerpAPI error: {e}")
@@ -217,7 +218,7 @@ def search_flights(query: str) -> str:
             "source": "Mock Data"
         }
         
-        return json.dumps(results, indent=2)
+        return results
         
     except Exception as e:
         error_result = {
@@ -225,7 +226,7 @@ def search_flights(query: str) -> str:
             "error": str(e),
             "query": query
         }
-        return json.dumps(error_result, indent=2)
+        return error_result
 
 
 @tool
@@ -298,14 +299,14 @@ def search_hotels(query: str) -> str:
                         })
                 
                 if hotels:
-                    return json.dumps({
+                    return {
                         "success": True,
                         "query": query,
                         "hotels": hotels,
                         "total_results": len(hotels),
                         "timestamp": datetime.now().isoformat(),
                         "source": "Google Search (SerpAPI - Real Data)"
-                    }, indent=2)
+                    }
                     
             except Exception as e:
                 print(f"⚠️  SerpAPI error: {e}")
@@ -521,7 +522,7 @@ def search_hotels(query: str) -> str:
             "source": "Mock Data (location-aware)"
         }
         
-        return json.dumps(results, indent=2)
+        return results
         
     except Exception as e:
         error_result = {
@@ -529,7 +530,7 @@ def search_hotels(query: str) -> str:
             "error": str(e),
             "query": query
         }
-        return json.dumps(error_result, indent=2)
+        return error_result
 
 
 # ============================================================================
@@ -711,8 +712,8 @@ def create_react_agent():
         }
     )
     
-    # After tools execute, go back to reason to process results
-    workflow.add_edge("act", "reason")
+    # After tools execute, go directly to respond to avoid infinite loops
+    workflow.add_edge("act", "respond")
     
     # After respond, end the conversation
     workflow.add_edge("respond", END)
