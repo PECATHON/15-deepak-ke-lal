@@ -1,34 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
+import EnhancedMessageRenderer from './EnhancedMessageRenderer';
 import './App.css';
+import './EnhancedChat.css';
 
 const API_BASE = 'http://localhost:8000';
+const WS_BASE = 'ws://localhost:8000';
 
-// Typing indicator component with animations
+// Typing indicator: single horizontal line with three animated dots
 const TypingIndicator = () => (
-  <motion.div 
+  <motion.div
     className="message message-assistant"
     initial={{ opacity: 0, y: 20 }}
     animate={{ opacity: 1, y: 0 }}
     exit={{ opacity: 0, y: -20 }}
   >
     <div className="message-header">
-      <span className="message-sender">🤖 Assistant</span>
+      <span className="message-sender">🤖 ava</span>
     </div>
     <div className="message-content typing-indicator">
-      <motion.span
-        animate={{ y: [0, -8, 0] }}
-        transition={{ duration: 0.6, repeat: Infinity, delay: 0 }}
-      />
-      <motion.span
-        animate={{ y: [0, -8, 0] }}
-        transition={{ duration: 0.6, repeat: Infinity, delay: 0.2 }}
-      />
-      <motion.span
-        animate={{ y: [0, -8, 0] }}
-        transition={{ duration: 0.6, repeat: Infinity, delay: 0.4 }}
-      />
+      <div className="typing-dots" aria-label="ava is thinking">
+        {[0,1,2].map(i => (
+          <motion.span
+            key={i}
+            className="typing-dot"
+            initial={{ y: 0, opacity: 0.6 }}
+            animate={{ y: [0, -6, 0], opacity: [0.6, 1, 0.6] }}
+            transition={{ duration: 0.8, repeat: Infinity, delay: i * 0.18 }}
+          />
+        ))}
+      </div>
     </div>
   </motion.div>
 );
@@ -39,7 +41,9 @@ function Chat() {
   const [userId] = useState('user_' + Math.random().toString(36).substr(2, 9));
   const [status, setStatus] = useState({ state: 'idle' });
   const [isProcessing, setIsProcessing] = useState(false);
+  const [partialResults, setPartialResults] = useState(null);
   const messagesEndRef = useRef(null);
+  const wsRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -49,33 +53,85 @@ function Chat() {
     scrollToBottom();
   }, [messages]);
 
-  // Poll status when processing
+  // WebSocket connection for real-time updates
   useEffect(() => {
-    let interval;
-    if (isProcessing) {
-      interval = setInterval(async () => {
-        try {
-          const response = await axios.get(`${API_BASE}/status/${userId}`);
-          setStatus(response.data);
-          
-          // If completed or error, stop processing
-          if (response.data.state === 'completed' || response.data.state === 'error') {
-            setIsProcessing(false);
-            if (response.data.response) {
-              setMessages(prev => [...prev, {
-                type: 'assistant',
-                content: response.data.response,
-                timestamp: new Date()
-              }]);
-            }
-          }
-        } catch (error) {
-          console.error('Status poll error:', error);
+    const ws = new WebSocket(`${WS_BASE}/ws/${userId}`);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log('✅ WebSocket connected');
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('📨 WebSocket message:', data);
+        
+        // Handle different message types
+        if (data.type === 'response' && data.response) {
+          // Agent response completed
+          setMessages(prev => [...prev, {
+            type: 'assistant', // logical type retained
+            content: data.response,
+            timestamp: new Date()
+          }]);
+          setIsProcessing(false);
+          setPartialResults(null);
+          setStatus({ state: 'completed' });
         }
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isProcessing, userId]);
+        else if (data.type === 'status_update') {
+          // Status update from backend
+          setStatus({ state: data.status, agent: data.current_agent });
+          if (data.partial_results) {
+            setPartialResults(data.partial_results);
+          }
+        }
+        else {
+          // Legacy format support
+          if (data.status) {
+            setStatus({ state: data.status });
+          }
+          
+          if (data.progress) {
+            setPartialResults(data.progress);
+          }
+          
+          if (data.status === 'completed' && data.response) {
+            setMessages(prev => [...prev, {
+              type: 'assistant', // logical type retained
+              content: data.response,
+              timestamp: new Date()
+            }]);
+            setIsProcessing(false);
+            setPartialResults(null);
+          }
+          
+          if (data.status === 'interrupted') {
+            setMessages(prev => [...prev, {
+              type: 'system',
+              content: '⚠️ Task interrupted - partial results saved',
+              timestamp: new Date()
+            }]);
+            setIsProcessing(false);
+          }
+        }
+      } catch (error) {
+        console.error('WebSocket message parse error:', error);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('❌ WebSocket error:', error);
+    };
+
+    ws.onclose = () => {
+      console.log('🔌 WebSocket disconnected');
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [userId]);
 
   const sendMessage = async () => {
     if (!input.trim()) return;
@@ -87,17 +143,29 @@ function Chat() {
     };
 
     setMessages(prev => [...prev, userMessage]);
+    const currentInput = input;
     setInput('');
     setIsProcessing(true);
     setStatus({ state: 'processing' });
+    setPartialResults(null);
 
     try {
       const response = await axios.post(`${API_BASE}/chat`, {
         user_id: userId,
-        message: input
+        message: currentInput
       });
 
-      // Task ID available in response.data.task_id if needed
+      // If response is immediate (no WebSocket update), add it
+      if (response.data.response && response.data.status === 'completed') {
+        setMessages(prev => [...prev, {
+          type: 'assistant', // logical type retained
+          content: response.data.response,
+          timestamp: new Date()
+        }]);
+        setIsProcessing(false);
+      }
+      
+      // WebSocket will handle async updates
 
     } catch (error) {
       console.error('Send message error:', error);
@@ -160,7 +228,7 @@ function Chat() {
                     animate={{ y: 0, opacity: 1 }}
                     transition={{ delay: 0.2 }}
                   >
-                    AI Travel Assistant
+                    Chat & Go (ava)
                   </motion.h2>
                   <motion.p
                     initial={{ opacity: 0 }}
@@ -171,9 +239,10 @@ function Chat() {
                   </motion.p>
                   <div className="examples">
                     {[
-                      { icon: "💺", text: "Find flights from NYC to LAX" },
-                      { icon: "🏨", text: "Show me hotels in Paris" },
-                      { icon: "✈️", text: "I need flights and hotels for Miami" }
+                      { icon: "✈️", text: "Find round-trip flights from Delhi to Dubai departing Jan 15 returning Jan 20" },
+                      { icon: "🏨", text: "Show me hotels in Paris with prices and images" },
+                      { icon: "🎫", text: "Book flight FL001 for John Doe with window seat" },
+                      { icon: "⚙️", text: "Update my preferences: Business class, 5-star hotels, budget 15000" }
                     ].map((example, idx) => (
                       <motion.div
                         key={idx}
@@ -210,7 +279,7 @@ function Chat() {
                       transition={{ delay: 0.1 }}
                     >
                       {msg.type === 'user' ? 'You' : 
-                       msg.type === 'assistant' ? 'Assistant' :
+                       msg.type === 'assistant' ? 'ava' :
                        msg.type === 'system' ? 'System' : 'Error'}
                     </motion.span>
                     <span className="message-time">
@@ -223,7 +292,7 @@ function Chat() {
                     animate={{ opacity: 1 }}
                     transition={{ delay: 0.15 }}
                   >
-                    {msg.content}
+                    <EnhancedMessageRenderer content={msg.content} />
                   </motion.div>
                 </motion.div>
               ))}

@@ -76,7 +76,7 @@ const Home = () => {
             transition={{ duration: 0.8, delay: 0.1 }}
             className="hero-title"
           >
-            Meet <span className="gradient-text">TravelBot</span>
+            Meet <span className="gradient-text">Chat &amp; Go</span>
           </motion.h1>
 
           {/* Subtitle */}
@@ -89,34 +89,22 @@ const Home = () => {
             Your intelligent travel companion for flights, hotels, destinations, and more.
           </motion.p>
 
-          {/* CTA Buttons */}
+          {/* Single centered CTA */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.3 }}
-            className="cta-buttons"
+            className="cta-single"
           >
             <motion.button
               whileHover={{ y: -2 }}
               whileTap={{ scale: 0.98 }}
-              className="btn-primary"
+              className="btn-primary btn-centered"
               onClick={() => navigate('/chat')}
             >
               <IoChatbubbles size={20} />
               Start Planning
               <IoArrowForward size={20} />
-            </motion.button>
-            
-            <motion.button
-              whileHover={{ y: -2 }}
-              whileTap={{ scale: 0.98 }}
-              className="btn-secondary"
-              onClick={() => {
-                const featuresSection = document.getElementById('features');
-                featuresSection?.scrollIntoView({ behavior: 'smooth' });
-              }}
-            >
-              Explore Features
             </motion.button>
           </motion.div>
         </motion.div>
@@ -135,7 +123,7 @@ const Home = () => {
             Powerful Features
           </h2>
           <p className="section-subtitle">
-            Discover how TravelBot transforms your travel planning experience
+            Discover how Chat &amp; Go transforms your travel planning experience
           </p>
         </motion.div>
 
@@ -162,7 +150,7 @@ const Home = () => {
       {/* Footer */}
       <footer className="footer">
         <div className="footer-content">
-          <p>&copy; 2024 TravelBot. Your AI Travel Assistant.</p>
+          <p>&copy; 2024 Chat &amp; Go. Your AI Travel Companion.</p>
           <p className="footer-subtitle">Powered by Multi-Agent AI System</p>
         </div>
       </footer>

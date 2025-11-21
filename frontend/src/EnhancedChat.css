@@ -1,0 +1,340 @@
+/* Enhanced Chat UI styles for bonus features */
+
+/* Price comparison cards */
+.price-comparison {
+  display: flex;
+  gap: 10px;
+  margin: 15px 0;
+  flex-wrap: wrap;
+}
+
+.provider-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 12px 18px;
+  border-radius: 12px;
+  color: white;
+  font-size: 14px;
+  min-width: 150px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.provider-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+}
+
+.provider-card.cheapest {
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+  border: 2px solid #0f7;
+}
+
+.provider-name {
+  font-weight: bold;
+  font-size: 13px;
+  opacity: 0.9;
+  margin-bottom: 4px;
+}
+
+.provider-price {
+  font-size: 20px;
+  font-weight: bold;
+}
+
+/* Multi-leg flight display */
+.flight-legs {
+  margin: 15px 0;
+}
+
+.flight-leg {
+  background: #f8f9fa;
+  padding: 15px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  border-left: 4px solid #4a90e2;
+}
+
+.leg-header {
+  font-weight: bold;
+  color: #4a90e2;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.leg-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.layover-info {
+  background: #fff3cd;
+  padding: 12px;
+  border-radius: 8px;
+  margin: 10px 0;
+  border-left: 4px solid #ffc107;
+}
+
+.layover-info strong {
+  color: #856404;
+}
+
+/* Image gallery */
+.image-gallery {
+  display: flex;
+  gap: 10px;
+  margin: 15px 0;
+  overflow-x: auto;
+}
+
+.hotel-image {
+  width: 200px;
+  height: 150px;
+  border-radius: 10px;
+  object-fit: cover;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.hotel-image:hover {
+  transform: scale(1.05);
+}
+
+/* Booking simulation */
+.booking-simulation {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
+  padding: 20px;
+  border-radius: 15px;
+  margin: 15px 0;
+}
+
+.booking-header {
+  font-size: 24px;
+  font-weight: bold;
+  margin-bottom: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.booking-details {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 15px;
+  border-radius: 10px;
+  margin: 10px 0;
+}
+
+.booking-id {
+  font-family: 'Courier New', monospace;
+  font-size: 18px;
+  font-weight: bold;
+  letter-spacing: 2px;
+}
+
+.booking-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 15px;
+}
+
+.booking-btn {
+  background: white;
+  color: #f5576c;
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: none;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.booking-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
+/* Price alert badge */
+.price-alert {
+  background: #ff6b6b;
+  color: white;
+  padding: 8px 15px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: bold;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+/* Map links */
+.map-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #4a90e2;
+  text-decoration: none;
+  font-weight: bold;
+  padding: 8px 15px;
+  background: #e3f2fd;
+  border-radius: 8px;
+  margin: 10px 5px 10px 0;
+  transition: all 0.2s;
+}
+
+.map-link:hover {
+  background: #4a90e2;
+  color: white;
+  transform: translateX(3px);
+}
+
+/* User preferences panel */
+.preferences-panel {
+  background: #f8f9fa;
+  padding: 15px;
+  border-radius: 12px;
+  margin: 15px 0;
+  border: 2px solid #e9ecef;
+}
+
+.preference-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.preference-item:last-child {
+  border-bottom: none;
+}
+
+.preference-label {
+  font-weight: 600;
+  color: #495057;
+}
+
+.preference-value {
+  color: #6c757d;
+  font-weight: 500;
+}
+
+/* Comparison highlight */
+.comparison-section {
+  background: #e7f3ff;
+  padding: 15px;
+  border-radius: 10px;
+  margin: 15px 0;
+  border-left: 4px solid #2196f3;
+}
+
+.comparison-title {
+  font-weight: bold;
+  color: #1976d2;
+  margin-bottom: 10px;
+  font-size: 16px;
+}
+
+.comparison-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.comparison-item {
+  background: white;
+  padding: 12px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.comparison-item strong {
+  color: #1976d2;
+  font-size: 14px;
+  display: block;
+  margin-bottom: 5px;
+}
+
+/* Amenities badges */
+.amenities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.amenity-badge {
+  background: #e8f5e9;
+  color: #2e7d32;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Star rating */
+.star-rating {
+  color: #ffc107;
+  font-size: 16px;
+  margin: 5px 0;
+}
+
+/* Round-trip indicator */
+.round-trip-badge {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 15px;
+  font-size: 12px;
+  font-weight: bold;
+  display: inline-block;
+  margin: 5px 0;
+}
+
+/* Virtual tour link */
+.virtual-tour-btn {
+  background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 25px;
+  border: none;
+  font-weight: bold;
+  cursor: pointer;
+  margin: 10px 5px;
+  transition: transform 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.virtual-tour-btn:hover {
+  transform: scale(1.05);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .price-comparison {
+    flex-direction: column;
+  }
+  
+  .provider-card {
+    min-width: 100%;
+  }
+  
+  .leg-details {
+    grid-template-columns: 1fr;
+  }
+  
+  .comparison-items {
+    grid-template-columns: 1fr;
+  }
+}

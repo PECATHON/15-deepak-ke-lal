@@ -74,13 +74,17 @@
 }
 
 /* CTA Buttons */
-.cta-buttons {
+/* Single CTA container */
+.cta-single {
   display: flex;
-  flex-wrap: wrap;
-  gap: 1.5rem;
   justify-content: center;
   align-items: center;
   margin-top: 2.5rem;
+}
+
+.btn-centered {
+  min-width: 260px;
+  justify-content: center;
 }
 
 .btn-primary {

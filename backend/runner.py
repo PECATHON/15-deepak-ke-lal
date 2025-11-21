@@ -2,13 +2,15 @@ import asyncio
 import uuid
 from typing import Dict, Any
 
+from langchain_core.messages import HumanMessage, AIMessage
+
 try:
     from .state_store import StateStore
-    from .graph_workflow import WORKFLOW, AgentState
+    from .langgraph_react_agent import create_react_agent
     from .interruption_manager import InterruptionManager, TaskStatus
 except ImportError:
     from state_store import StateStore
-    from graph_workflow import WORKFLOW, AgentState
+    from langgraph_react_agent import create_react_agent
     from interruption_manager import InterruptionManager, TaskStatus
 
 
@@ -22,10 +24,12 @@ class AgentManager:
     - Real-time status updates
     """
 
-    def __init__(self):
+    def __init__(self, ws_manager=None):
         self._store = StateStore()
         self._interruption_manager = InterruptionManager()
         self._thread_ids: Dict[str, str] = {}
+        self._agent = create_react_agent()
+        self._ws_manager = ws_manager
 
     async def handle_user_message(self, user_id: str, message: str) -> str:
         """Handle a new user message with automatic interruption support.
@@ -59,111 +63,96 @@ class AgentManager:
         async def _run():
             """Execute the workflow with interruption support."""
             try:
+                print(f"🚀 Starting workflow for user {user_id}, message: {message}")
                 # Update status to running
                 await self._interruption_manager.update_task_status(
                     user_id, TaskStatus.RUNNING
                 )
+                print(f"✅ Task status updated to RUNNING")
                 
                 # Get previous context for potential continuation
                 previous_context = await self._interruption_manager.get_previous_context(
                     user_id, message
                 )
+                print(f"📝 Previous context: {previous_context}")
                 
-                # Prepare initial state
-                conversation = await self._store.get_conversation(user_id)
-                partials = await self._store.get_partials(user_id)
-                
-                initial_state: AgentState = {
-                    "user_id": user_id,
-                    "messages": conversation,
-                    "user_query": message,
-                    "intent": "",
-                    "flight_input": None,
-                    "hotel_input": None,
-                    "flight_results": None,
-                    "hotel_results": None,
-                    "final_response": None,
-                    "cancel_requested": False,
-                    "status": "started",
-                    # Include previous context if available
-                    "previous_context": previous_context,
-                    "partial_results": partials
-                }
-
                 # Get cancellation event from interruption manager
                 cancel_event = await self._interruption_manager.get_cancellation_event(user_id)
+                print(f"🔔 Cancellation event obtained")
                 
-                # Run the workflow with state persistence
+                # Prepare initial state for ReAct agent
+                conversation = await self._store.get_conversation(user_id)
+                print(f"💬 Conversation history: {len(conversation)} messages")
+                
+                # Convert conversation to LangChain messages
+                messages = []
+                for msg in conversation:
+                    if msg["sender"] == "user":
+                        messages.append(HumanMessage(content=msg["message"]))
+                    elif msg["sender"] == "assistant":
+                        messages.append(AIMessage(content=msg["message"]))
+                
+                # Add current message (already saved to conversation history)
+                # messages.append(HumanMessage(content=message))
+                
+                initial_state = {
+                    "messages": messages
+                }
+                
                 config = {
                     "configurable": {
-                        "thread_id": thread_id,
-                        "user_id": user_id,
-                        "cancel_event": cancel_event
+                        "thread_id": thread_id
                     }
                 }
                 
-                final_state = None
+                print(f"🤖 Invoking ReAct agent...")
+                print(f"   Agent object: {self._agent}")
+                print(f"   Initial state: {initial_state}")
+                print(f"   Config: {config}")
                 
-                # Stream workflow execution and track progress
-                async for state_update in WORKFLOW.astream(initial_state, config):
-                    # Check if cancelled
-                    if cancel_event and cancel_event.is_set():
-                        raise asyncio.CancelledError("Task cancelled by user")
-                    
-                    final_state = state_update
-                    
-                    # Extract node name and state
-                    node_name = list(state_update.keys())[-1] if state_update else "unknown"
-                    node_state = state_update.get(node_name, {})
-                    
-                    # Update interruption manager with progress
-                    current_agent = node_state.get("current_agent", node_name)
-                    
-                    await self._interruption_manager.update_task_status(
-                        user_id=user_id,
-                        status=TaskStatus.RUNNING,
-                        current_agent=current_agent
-                    )
-                    
-                    # Save partial results if available
-                    if node_state.get("flight_results"):
-                        await self._interruption_manager.save_partial_results(
-                            user_id, "flight", node_state["flight_results"]
-                        )
-                        await self._store.save_partial(
-                            user_id, "flight", node_state["flight_results"]
-                        )
-                    
-                    if node_state.get("hotel_results"):
-                        await self._interruption_manager.save_partial_results(
-                            user_id, "hotel", node_state["hotel_results"]
-                        )
-                        await self._store.save_partial(
-                            user_id, "hotel", node_state["hotel_results"]
-                        )
+                # Run the ReAct agent
+                result = await asyncio.to_thread(
+                    self._agent.invoke,
+                    initial_state,
+                    config
+                )
+                print(f"✅ Agent completed! Result: {result}")
                 
-                # Extract final response
-                if final_state:
-                    last_node_state = list(final_state.values())[-1] if final_state else {}
-                    response = last_node_state.get("final_response", "Workflow completed")
-                    
-                    # Save to conversation history
-                    await self._store.append_message(user_id, "assistant", response)
-                    
-                    # Mark task as completed
-                    await self._interruption_manager.complete_task(
-                        user_id=user_id,
-                        final_results={
-                            "response": response,
-                            "flight_results": last_node_state.get("flight_results"),
-                            "hotel_results": last_node_state.get("hotel_results")
-                        },
-                        status=TaskStatus.COMPLETED
-                    )
-                    
-                    return {"task_id": task_id, "response": response}
+                # Check if cancelled during execution
+                if cancel_event and cancel_event.is_set():
+                    raise asyncio.CancelledError("Task cancelled by user")
+                
+                # Extract final response from agent
+                final_messages = result.get("messages", [])
+                response = final_messages[-1].content if final_messages else "No response generated"
+                
+                # Save to conversation history
+                await self._store.append_message(user_id, "assistant", response)
+                
+                # Mark task as completed
+                await self._interruption_manager.complete_task(
+                    user_id=user_id,
+                    final_results={"response": response},
+                    status=TaskStatus.COMPLETED
+                )
+                
+                # Send response via WebSocket if available
+                if self._ws_manager:
+                    print(f"📡 Sending WebSocket message to {user_id}")
+                    await self._ws_manager.send_message(user_id, {
+                        "type": "response",
+                        "task_id": task_id,
+                        "status": "completed",
+                        "response": response
+                    })
+                    print(f"✅ WebSocket message sent!")
+                else:
+                    print(f"⚠️ No WebSocket manager available!")
+                
+                return {"task_id": task_id, "response": response}
                 
             except asyncio.CancelledError:
+                print(f"⚠️ Task cancelled for user {user_id}")
                 # Preserve partial results on cancellation
                 partials = await self._store.get_partials(user_id)
                 
@@ -184,6 +173,9 @@ class AgentManager:
                 return {"status": "interrupted", "task_id": task_id, "partial_results": partials}
                 
             except Exception as e:
+                print(f"❌ ERROR in workflow: {type(e).__name__}: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 error_msg = str(e)
                 
                 await self._interruption_manager.update_task_status(
@@ -194,6 +186,21 @@ class AgentManager:
 
         # Create and track the task
         task = asyncio.create_task(_run())
+        
+        # Add done callback to catch any exceptions
+        def task_done_callback(t):
+            try:
+                exc = t.exception()
+                if exc:
+                    print(f"❌ TASK EXCEPTION for {user_id}: {type(exc).__name__}: {str(exc)}")
+                    import traceback
+                    traceback.print_exception(type(exc), exc, exc.__traceback__)
+            except asyncio.CancelledError:
+                print(f"✅ Task cancelled for {user_id}")
+            except Exception as e:
+                print(f"❌ Error in task callback: {e}")
+        
+        task.add_done_callback(task_done_callback)
         await self._interruption_manager.set_task_reference(user_id, task)
         
         return task_id

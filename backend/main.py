@@ -73,6 +73,16 @@ class InterruptRequest(BaseModel):
     user_id: str
 
 
+# Initialize manager after ws_manager is created
+manager = None
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize the agent manager with WebSocket support."""
+    global manager
+    manager = AgentManager(ws_manager=ws_manager)
+
+
 @app.get("/")
 def root():
     return {
